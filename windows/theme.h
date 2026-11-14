@@ -21,11 +21,12 @@ static void blend(HDC dc,RECT r,unsigned a,unsigned b){
  {r.right,r.bottom,((b>>16)&255)<<8,((b>>8)&255)<<8,(b&255)<<8,0}};
  GRADIENT_RECT g={0,1};GradientFill(dc,v,2,&g,1,GRADIENT_FILL_RECT_V);
 }
+#include "seven.h"
 static void paintButton(DRAWITEMSTRUCT *d){
  Theme t=themes[skin];RECT r=d->rcItem;HDC dc=d->hDC;
  if(contrastMode){DrawFrameControl(dc,&r,DFC_BUTTON,DFCS_BUTTONPUSH|((d->itemState&ODS_SELECTED)?DFCS_PUSHED:0));}
  else{
- fillColor(dc,r,glass?RGB(0,0,0):color(t.panel));InflateRect(&r,-1,-1);
+ if(skin==SEVEN)sevenSurface(dc,d->hwndItem);else fillColor(dc,r,color(t.panel));InflateRect(&r,-1,-1);
  bool orb=skin==SEVEN && d->CtlID==PLAY;
  if(orb){int center=(r.left+r.right)/2,rad=(r.bottom-r.top)/2;r.left=center-rad;r.right=center+rad;}
  int corner=orb?r.bottom-r.top:scale(t.radius*2);

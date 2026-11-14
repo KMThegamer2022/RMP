@@ -86,6 +86,7 @@ jobs:
           path: |
             RMP-Windows-x64.zip
             RMP-Setup-x64.exe
+            RMP-Windows7-preview.png
   publish:
     if: startsWith(github.ref, 'refs/tags/')
     needs: build
