@@ -1,4 +1,4 @@
-//! Media engine and queue. The AppKit adapter calls this API on the main thread.
+// Media engine and queue. The AppKit adapter calls this API on the main thread.
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::ptr;
 type Handle = *mut c_void;
@@ -70,6 +70,16 @@ unsafe fn ensure_engine(p: &mut Player) -> bool {
         .and_then(|exe| exe.parent().map(|dir| dir.join("plugins/plugins.dat")));
     if plugins.is_some_and(|cache| cache.is_file()) {
         args.push(c"--no-plugins-scan".as_ptr());
+    }
+    // FluidSynth resolves its preset bank separately from the plugin cache.
+    #[cfg(windows)]
+    let soundfont = std::env::current_exe().ok().and_then(|exe| {
+        let bank = exe.parent()?.join("TimGM6mb.sf2");
+        CString::new(format!("--soundfont={}", bank.to_str()?)).ok()
+    });
+    #[cfg(windows)]
+    if let Some(bank) = &soundfont {
+        args.push(bank.as_ptr());
     }
     let engine = libvlc_new(args.len() as i32, args.as_ptr());
     if engine.is_null() {

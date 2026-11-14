@@ -44,3 +44,5 @@ Once per launch, RMP checks published GitHub releases in the background. A newer
 New installations start with **VLC**, a light, compact theme based on VLC's desktop transport. The other five themes remain available, and upgrades retain your selection. The Windows 7 theme uses the standard Windows caption, menus and buttons with the frame extended into the bottom transport area. Fullscreen expands video to the window edges. Its floating controls hide after 2.5 seconds of inactivity and return when the pointer moves. Use the fullscreen control or Escape to leave.
 
 The Windows installer registers RMP under Default apps. Choose Rust Media Player in Windows Settings → Apps → Default apps, or choose it from Open with for a media file. On Mac, select a media file in Finder → Get Info → Open with → RMP → Change All. The portable Windows ZIP does not register the application with Windows.
+
+Standard MIDI files (.mid and .midi) play through the normal file, queue and playback controls. Windows includes the TimGM6mb General MIDI SoundFont for offline synthesis. macOS uses the system AudioToolbox instruments.
