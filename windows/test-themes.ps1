@@ -74,9 +74,11 @@ try {
  }
  $volume=[ThemeTest]::GetDlgItem($w,108)
  $initialVolume=[ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32()
- [void][ThemeTest]::SendMessage($volume,0x20a,[IntPtr](120 -shl 16),[IntPtr]::Zero)
+ $r=[Drawing.Rectangle]::Empty;[void][ThemeTest]::GetWindowRect($volume,[ref]$r)
+ [void][ThemeTest]::SetCursorPos([int](($r.X+$r.Width)/2),[int](($r.Y+$r.Height)/2))
+ [ThemeTest]::mouse_event(0x800,0,0,120,[UIntPtr]::Zero);Start-Sleep -Milliseconds 200
  if([ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -le $initialVolume){throw 'Wheel up did not raise volume'}
- [void][ThemeTest]::SendMessage($volume,0x20a,[IntPtr](-120 -shl 16),[IntPtr]::Zero)
+ [ThemeTest]::mouse_event(0x800,0,0,[uint32]4294967176,[UIntPtr]::Zero);Start-Sleep -Milliseconds 200
  if([ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $initialVolume){throw 'Wheel down did not restore volume'}
  $button=[ThemeTest]::GetDlgItem($w,102)
  $oldFont=[ThemeTest]::SendMessage($button,49,[IntPtr]::Zero,[IntPtr]::Zero)
