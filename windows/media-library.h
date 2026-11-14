@@ -41,6 +41,7 @@ static bool containsTitle(const WCHAR *value,const WCHAR *query){
   if(CompareStringOrdinal(value+pos,length,query,length,TRUE)==CSTR_EQUAL)return true;
  return false;
 }
+#include "media-search.h"
 static void markPlayingInQueue(void){
  if(browserPage==NAV_LIBRARY||!IsWindowVisible(mediaRows))return;
  int current=(int)ap_index(player);
@@ -53,7 +54,7 @@ static void markPlayingInQueue(void){
   if((int)row.lParam==current){ListView_SetItemState(mediaRows,n,LVIS_SELECTED,LVIS_SELECTED);break;}
  }
 }
-static void rebuildMediaRows(void){
+static void updateMediaRows(const bool *extra,size_t extraCount){
  if(!mediaRows || !mediaTheme())return;
  EnableWindow(GetDlgItem(mainwin,SAVE_LIST),ap_count(player)>0);
  if(fullscreen||(skin==SEVEN&&browserPage==NAV_NOW))return;
@@ -70,7 +71,7 @@ static void rebuildMediaRows(void){
   if(!path)continue;
   WCHAR *title=path;
   for(WCHAR *p=path;*p;p++)if(*p==L'\\'||*p==L'/')title=p+1;
-  if(containsTitle(path,query)){
+  if(containsTitle(path,query)||(extra&&i<extraCount&&extra[i])){
    LVITEMW row={0};row.mask=LVIF_TEXT|LVIF_PARAM|LVIF_IMAGE;row.iItem=ListView_GetItemCount(mediaRows);
    row.pszText=*title?title:path;row.lParam=(LPARAM)i;
    int item=(int)SendMessageW(mediaRows,LVM_INSERTITEMW,0,(LPARAM)&row);
@@ -85,6 +86,11 @@ static void rebuildMediaRows(void){
  resetDetails();
  SendMessageW(mediaRows,WM_SETREDRAW,TRUE,0);
  InvalidateRect(mediaRows,NULL,TRUE);lastQueueMark=-2;markPlayingInQueue();
+}
+static void rebuildMediaRows(void){
+ InterlockedIncrement(&searchEpoch);
+ searchDue=mediaRows&&GetWindowTextLengthW(mediaFilter)?GetTickCount64()+300:0;
+ updateMediaRows(NULL,0);
 }
 static void layoutMediaBrowser(int width,int deck){
  bool visible=mediaTheme()&&!fullscreen;
