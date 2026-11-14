@@ -40,6 +40,9 @@ jobs:
       - name: Switch all themes and verify preference restoration
         shell: pwsh
         run: ./windows/test-themes.ps1 ./build/RMP/RMP.exe (Resolve-Path fixture.wav)
+      - name: Exercise manual update command against GitHub
+        shell: pwsh
+        run: ./windows/test-update.ps1 ./build/RMP/RMP.exe
       - name: Compare launch timings with Windows v1
         shell: pwsh
         run: |

@@ -47,9 +47,12 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  NSMenuItem *item=[parent addItemWithTitle:title action:nil keyEquivalent:@""];
  NSMenu *m=[[NSMenu alloc]initWithTitle:title];item.submenu=m;return m;
 }
+-(void)manualUpdate:(id)sender{checkMacUpdates(YES);}
 -(void)menus{
  NSMenu *bar=[NSMenu new];NSApp.mainMenu=bar;
  NSMenu *app=[self menu:@"RMP" parent:bar];
+ [self item:app title:@"Check for Updates…" action:@selector(manualUpdate:) key:@""];
+ [app addItem:NSMenuItem.separatorItem];
  [app addItemWithTitle:@"Quit RMP" action:@selector(terminate:) keyEquivalent:@"q"];
  NSMenu *file=[self menu:@"File" parent:bar];
  [self item:file title:@"Open Files…" action:@selector(open:) key:@"o"];
@@ -153,7 +156,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
  if(pending.count){[self accept:pending];pending=nil;}
  [self refresh:nil];
- checkMacUpdates();
+ checkMacUpdates(NO);
 }
 -(void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls{
  if(p)[self accept:urls];else{if(!pending)pending=[NSMutableArray new];[pending addObjectsFromArray:urls];}

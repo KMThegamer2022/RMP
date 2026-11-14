@@ -1,7 +1,7 @@
-param([int]$PlayerId,[string]$CurrentVersion,[string]$PlayerPath)
+param([int]$PlayerId,[string]$CurrentVersion,[string]$PlayerPath,[switch]$Manual)
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Web.Extensions
+
 function Notice($message){[void][Windows.Forms.MessageBox]::Show($message,'RMP update','OK','Warning')}
 $client=New-Object Net.WebClient
 $client.Headers['User-Agent']='RMP-Updater'
@@ -10,12 +10,12 @@ $client.Headers['Accept']='application/vnd.github+json'
 $repo='https://github.com/KMThegamer2022/RMP/releases/download/'
 try {
  $json=$client.DownloadString('https://api.github.com/repos/KMThegamer2022/RMP/releases?per_page=100')
- $parser=New-Object Web.Script.Serialization.JavaScriptSerializer
- $parser.MaxJsonLength=16777216
+ if(Get-Command ConvertFrom-Json -ErrorAction SilentlyContinue){$releases=ConvertFrom-Json -InputObject $json}
+ else {Add-Type -AssemblyName System.Web.Extensions;$parser=New-Object Web.Script.Serialization.JavaScriptSerializer;$parser.MaxJsonLength=16777216;$releases=$parser.DeserializeObject($json)}
  $best=[Version]$CurrentVersion
- foreach($r in $parser.DeserializeObject($json)){
+ foreach($r in $releases){
   if($r.draft -or $r.prerelease -or $r.tag_name -notmatch '^v(\d+\.\d+\.\d+)(?:-windows)?$'){continue}
-  $version=[Version]$matches[1]
+  $version=[Version](($r.tag_name -replace '^v','') -replace '-windows$','')
   if($version -le $best){continue}
   foreach($a in $r.assets){
    if($a.name -eq 'RMP-Setup-x64.exe' -and $a.browser_download_url -ceq ($repo+$r.tag_name+'/'+$a.name) -and $a.digest -match '^sha256:[0-9a-f]{64}$'){
@@ -23,10 +23,10 @@ try {
    }
   }
  }
- if(!$asset){return}
+ if(!$asset){if($Manual){[void][Windows.Forms.MessageBox]::Show("RMP $CurrentVersion is up to date.",'RMP update','OK','Information')};return}
  $player=Get-Process -Id $PlayerId
- if($player.MainModule.FileName -ne $PlayerPath){return}
-} catch {return}
+ if($player.MainModule.FileName -ne $PlayerPath){throw 'The running player could not be identified.'}
+} catch {if($Manual){Notice ("Could not check for updates. "+$_.Exception.Message)};return}
 if([Windows.Forms.MessageBox]::Show(("RMP "+$best+" is available. Update now?"+[Environment]::NewLine+[Environment]::NewLine+$release.body),'RMP update','YesNo','Information') -ne 'Yes'){return}
 $temp=Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 $null=[IO.Directory]::CreateDirectory($temp)

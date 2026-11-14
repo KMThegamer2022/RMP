@@ -30,12 +30,20 @@ static void stageUpdate(NSDictionary *asset,NSString *version){
  dispatch_async(dispatch_get_main_queue(),^{[NSApp terminate:nil];});
  }] resume];
 }
-static void checkMacUpdates(void){
+static BOOL checkingUpdates=NO, explicitCheck=NO;
+static void finishCheck(NSString *title,NSString *details){
+ dispatch_async(dispatch_get_main_queue(),^{
+ BOOL show=explicitCheck;explicitCheck=NO;checkingUpdates=NO;
+ if(show){NSAlert *a=[NSAlert new];a.messageText=title;a.informativeText=details;[a runModal];}
+ });
+}
+static void checkMacUpdates(BOOL manual){
  NSString *current=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];if(!validVersion(current))return;
- NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.github.com/repos/KMThegamer2022/RMP/releases?per_page=100"]];[req setValue:@"RMP-Updater" forHTTPHeaderField:@"User-Agent"];req.timeoutInterval=15;
+ explicitCheck|=manual;if(checkingUpdates)return;checkingUpdates=YES;
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.github.com/repos/KMThegamer2022/RMP/releases?per_page=100"]];[req setValue:@"RMP-Updater" forHTTPHeaderField:@"User-Agent"];req.timeoutInterval=15;req.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
  [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
- if(error||[(NSHTTPURLResponse *)response statusCode]!=200)return;
- id releases=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];if(![releases isKindOfClass:NSArray.class])return;
+ if(error||[(NSHTTPURLResponse *)response statusCode]!=200){finishCheck(@"Could not check for updates",error.localizedDescription?:[NSString stringWithFormat:@"GitHub returned HTTP %ld.",(long)[(NSHTTPURLResponse *)response statusCode]]);return;}
+ id releases=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];if(![releases isKindOfClass:NSArray.class]){finishCheck(@"Could not check for updates",@"GitHub returned an unexpected response.");return;}
  NSString *best=current,*notes=nil;NSDictionary *asset=nil;
  for(NSDictionary *r in releases){if([r[@"prerelease"] boolValue]||[r[@"draft"] boolValue])continue;
  NSString *tag=r[@"tag_name"];if(![tag hasPrefix:@"v"])continue;
@@ -47,10 +55,10 @@ static void checkMacUpdates(void){
  if(![expected isEqual:a[@"browser_download_url"]]||![a[@"digest"] isKindOfClass:NSString.class]||![a[@"digest"] hasPrefix:@"sha256:"])continue;
  best=v;asset=a;notes=[r[@"body"] isKindOfClass:NSString.class]?r[@"body"]:@"";break;}
  }
- if(!asset)return;
+ if(!asset){finishCheck(@"RMP is up to date",[NSString stringWithFormat:@"You are running RMP %@.",current]);return;}
  dispatch_async(dispatch_get_main_queue(),^{NSAlert *a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"Update to RMP %@?",best];a.informativeText=@"RMP will download the update and reopen.";
  NSScrollView *scroll=[[NSScrollView alloc]initWithFrame:NSMakeRect(0,0,400,160)];scroll.hasVerticalScroller=YES;NSTextView *text=[[NSTextView alloc]initWithFrame:scroll.bounds];text.editable=NO;text.string=notes;scroll.documentView=text;a.accessoryView=scroll;
- [a addButtonWithTitle:@"Update"];[a addButtonWithTitle:@"Not now"];if([a runModal]==NSAlertFirstButtonReturn)stageUpdate(asset,best);
+ [a addButtonWithTitle:@"Update"];[a addButtonWithTitle:@"Not now"];NSModalResponse answer=[a runModal];checkingUpdates=NO;explicitCheck=NO;if(answer==NSAlertFirstButtonReturn)stageUpdate(asset,best);
  });
  }] resume];
 }
