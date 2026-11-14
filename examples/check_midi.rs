@@ -27,7 +27,7 @@ extern "C" fn samples(_: Handle, buffer: *const i16, frames: u32, _: i64) {
 }
 
 fn main() {
-    let file = CString::new(std::env::args().nth(1).expect("MIDI fixture")).unwrap();
+    let file = std::ffi::CString::new(std::env::args().nth(1).expect("MIDI fixture")).unwrap();
     unsafe {
         let p = ap_create(ptr::null_mut());
         assert!(ensure_engine(&mut *p));

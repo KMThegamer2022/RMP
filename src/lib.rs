@@ -1,6 +1,9 @@
 // Media engine and queue. The AppKit adapter calls this API on the main thread.
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
+mod media_library;
+use media_library::{Item, Library};
+use std::path::Path;
 type Handle = *mut c_void;
 #[repr(C)]
 struct Track {
@@ -47,7 +50,8 @@ pub struct Player {
     view: Handle,
     engine: Handle,
     player: Handle,
-    queue: Vec<(CString, bool)>,
+    queue: Vec<Item>,
+    library: Library,
     current: Option<usize>,
     volume: i32,
 }
@@ -59,6 +63,7 @@ pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
         engine: ptr::null_mut(),
         player: ptr::null_mut(),
         queue: Vec::new(),
+        library: Library::new(),
         current: None,
         volume: 80,
     }))
@@ -93,7 +98,7 @@ unsafe fn create_engine() -> Engine {
     #[cfg(windows)]
     let soundfont = std::env::current_exe().ok().and_then(|exe| {
         let bank = exe.parent()?.join("TimGM6mb.sf2");
-        CString::new(format!("--soundfont={}", bank.to_str()?)).ok()
+        std::ffi::CString::new(format!("--soundfont={}", bank.to_str()?)).ok()
     });
     #[cfg(windows)]
     if let Some(bank) = &soundfont {
@@ -140,7 +145,48 @@ pub unsafe extern "C" fn ap_destroy(raw: *mut Player) {
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_add(p: &mut Player, s: *const c_char, network: bool) {
-    p.queue.push((CStr::from_ptr(s).to_owned(), network))
+    let name = CStr::from_ptr(s);
+    let item = if network {
+        (name.to_owned(), true)
+    } else {
+        name.to_str().ok().and_then(|path| media_library::local_item(path).ok())
+            .unwrap_or_else(|| (name.to_owned(), false))
+    };
+    p.library.remember(std::slice::from_ref(&item));
+    p.queue.push(item);
+}
+#[no_mangle]
+pub extern "C" fn ap_library_count(p: &Player) -> usize {
+    p.library.items.len()
+}
+#[no_mangle]
+pub extern "C" fn ap_library_item(p: &Player, index: usize) -> *const c_char {
+    p.library.items.get(index).map_or(ptr::null(), |item| item.0.as_ptr())
+}
+#[no_mangle]
+pub unsafe extern "C" fn ap_library_play(p: &mut Player, index: usize) -> bool {
+    let Some(item) = p.library.items.get(index) else { return false; };
+    let index = p.queue.iter().position(|queued| queued == item).unwrap_or_else(|| {
+        p.queue.push(item.clone());
+        p.queue.len()-1
+    });
+    ap_play(p, index)
+}
+#[no_mangle]
+pub unsafe extern "C" fn ap_playlist_save(p: &Player, path: *const c_char) -> bool {
+    !path.is_null() && CStr::from_ptr(path).to_str().is_ok_and(|path|
+        media_library::write_playlist(Path::new(path), &p.queue).is_ok())
+}
+#[no_mangle]
+pub unsafe extern "C" fn ap_playlist_load(p: &mut Player, path: *const c_char) -> bool {
+    if path.is_null() { return false; }
+    let Ok(path) = CStr::from_ptr(path).to_str() else { return false; };
+    let Ok(items) = media_library::read_playlist(Path::new(path)) else { return false; };
+    ap_stop(p);
+    p.current = None;
+    p.library.remember(&items);
+    p.queue = items;
+    true
 }
 #[no_mangle]
 pub extern "C" fn ap_count(p: &Player) -> usize {
