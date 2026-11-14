@@ -26,11 +26,11 @@ static bool loadSheen(void){
  return true;
 }
 static void freeSheen(void){if(sheenDC){SelectObject(sheenDC,oldSheenBitmap);DeleteObject(sheenBitmap);DeleteDC(sheenDC);sheenDC=NULL;}}
-static void drawGlassBand(HDC dc,RECT band){
+static void drawGlassBand(HDC dc,RECT band,bool child){
  if(IsRectEmpty(&band))return;
  if(!glass||!loadSheen()){blend(dc,band,0xe8f6ff,0xb4cfe4);return;}
  BLENDFUNCTION mode={AC_SRC_OVER,0,255,AC_SRC_ALPHA};
- fillColor(dc,band,RGB(0,0,0));int saved=SaveDC(dc);IntersectClipRect(dc,band.left,band.top,band.right,band.bottom);
+ fillColor(dc,band,child?RGB(235,246,255):RGB(0,0,0));int saved=SaveDC(dc);IntersectClipRect(dc,band.left,band.top,band.right,band.bottom);
  for(int x=band.left;x<band.right;x+=384)AlphaBlend(dc,x,band.top,384,band.bottom-band.top,sheenDC,0,0,384,128,mode);
  RestoreDC(dc,saved);
 }
@@ -39,11 +39,11 @@ static void sevenSurface(HDC dc,HWND child){
  POINT offset={0};if(child!=mainwin)MapWindowPoints(child,mainwin,&offset,1);
  int save=SaveDC(dc);SetViewportOrgEx(dc,-offset.x,-offset.y,NULL);
  fillColor(dc,area,color(0xbdd4e7));
- RECT top=area;top.bottom=scale(32);drawGlassBand(dc,top);
+ RECT top=area;top.bottom=scale(32);drawGlassBand(dc,top,child!=mainwin);
  RECT command=area;command.top=scale(32);command.bottom=scale(56);
  blend(dc,command,0xf9fcff,0xdce7f2);
  RECT deck=area;deck.top=deck.bottom-scale(100);
- drawGlassBand(dc,deck);
+ drawGlassBand(dc,deck,child!=mainwin);
  RECT line=deck;line.bottom=line.top+1;fillColor(dc,line,RGB(255,255,255));
  RECT edge=area;InflateRect(&edge,-1,-1);SetDCBrushColor(dc,color(0xf3fbff));FrameRect(dc,&edge,GetStockObject(DC_BRUSH));
  RestoreDC(dc,save);

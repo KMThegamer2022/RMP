@@ -154,7 +154,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_NCHITTEST:{
  LRESULT hit=DefWindowProcW(w,msg,wp,lp);if(hit==HTCLIENT&&sevenFrame()){
  POINT pt={(short)LOWORD(lp),(short)HIWORD(lp)};ScreenToClient(w,&pt);
- if(pt.y>=0 && pt.y<scale(32) && ChildWindowFromPointEx(w,pt,CWP_SKIPINVISIBLE|CWP_SKIPDISABLED)==w)return HTCAPTION;
+ if(pt.y>=0 && pt.y<scale(32) && (ChildWindowFromPointEx(w,pt,CWP_SKIPINVISIBLE)==w||ChildWindowFromPointEx(w,pt,CWP_SKIPINVISIBLE)==captionLabel))return HTCAPTION;
  }return hit;}
  case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
  LRESULT result=DefWindowProcW(w,msg,wp,lp);
@@ -169,7 +169,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
  control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);control(w,L"BUTTON",L"Theme ▾",THEME_BUTTON,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
- control(w,L"BUTTON",L"Menu  ▾",CAP_MENU,BS_OWNERDRAW);captionLabel=control(w,L"STATIC",L"RMP · Rust Media Player",0,SS_CENTERIMAGE|SS_ENDELLIPSIS);EnableWindow(captionLabel,FALSE);control(w,L"BUTTON",L"Minimize",CAP_MIN,BS_OWNERDRAW);control(w,L"BUTTON",L"Maximize or restore",CAP_MAX,BS_OWNERDRAW);control(w,L"BUTTON",L"Close",CAP_CLOSE,BS_OWNERDRAW);
+ control(w,L"BUTTON",L"Menu  ▾",CAP_MENU,BS_OWNERDRAW);captionLabel=control(w,L"STATIC",L"RMP · Rust Media Player",0,SS_CENTERIMAGE|SS_ENDELLIPSIS);control(w,L"BUTTON",L"Minimize",CAP_MIN,BS_OWNERDRAW);control(w,L"BUTTON",L"Maximize or restore",CAP_MAX,BS_OWNERDRAW);control(w,L"BUTTON",L"Close",CAP_CLOSE,BS_OWNERDRAW);
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
