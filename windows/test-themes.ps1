@@ -5,6 +5,7 @@ Add-Type -ReferencedAssemblies System.Drawing.Primitives @'
 using System;
 using System.Runtime.InteropServices;
 public class ThemeTest {
+ [DllImport("user32")] public static extern bool SetWindowPos(IntPtr w,IntPtr after,int x,int y,int cx,int cy,uint flags);
  [DllImport("user32")] public static extern bool PrintWindow(IntPtr w,IntPtr dc,uint flags);
  [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out System.Drawing.Rectangle rect);
  [DllImport("user32")] public static extern IntPtr SendMessage(IntPtr w,uint msg,IntPtr wp,IntPtr lp);
@@ -31,12 +32,13 @@ try {
   [void][ThemeTest]::SendMessage($w,273,[IntPtr]$id,[IntPtr]::Zero)
   if($id -ne 311){Check-Menu $w $id}
   if ($id -eq 311) {
-   Start-Sleep -Milliseconds 450
+   [void][ThemeTest]::SetWindowPos($w,[IntPtr](-1),10,10,900,570,0x40)
+   Start-Sleep -Milliseconds 700
    $rect=[Drawing.Rectangle]::Empty
    [void][ThemeTest]::GetWindowRect($w,[ref]$rect)
    $bmp=[Drawing.Bitmap]::new($rect.Width-$rect.X,$rect.Height-$rect.Y)
-   $g=[Drawing.Graphics]::FromImage($bmp);$dc=$g.GetHdc()
-   try {if(![ThemeTest]::PrintWindow($w,$dc,2)){throw 'Window capture failed'}}finally{$g.ReleaseHdc($dc)}
+   $g=[Drawing.Graphics]::FromImage($bmp) 
+   $g.CopyFromScreen($rect.X,$rect.Y,0,0,$bmp.Size)
    $bmp.Save((Join-Path $pwd 'RMP-Windows7-preview.png'));$g.Dispose();$bmp.Dispose()
   }
   if ((Get-ItemPropertyValue 'HKCU:\Software\RMP' Theme) -ne ($id-310)){throw 'Preference was not saved'}
