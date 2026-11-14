@@ -32,3 +32,9 @@ Open **Theme ▾** in the player or **Theme** in the menu bar. Windows 10/11 use
 The Windows 7 theme extends genuine DWM glass into the top strip and bottom playback bar on a Windows 7 desktop with composition enabled. On newer Windows desktops the same theme requests Desktop Acrylic or compositor blur. A blue gradient is available when the effect cannot be enabled. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
 
 The three Windows themes draw on screenshots of [XP Explorer](https://gekk.info/articles/explorer.html), [Windows Media Player 12 on Windows 7](https://harisnadeem.com/2009/01/29/windows-7-screenshots-eye-candy/windows-media-player-12/), and [Films & TV on Windows 10](https://learn.microsoft.com/en-us/answers/questions/2813678/video-playback-stretched-over-windows-media-player).
+
+## Installing and updating
+
+Both graphical installers let you select an initial theme. Windows installs for the current account. On macOS, open the setup disk image and run RMP Setup to install in ~/Applications. You can change the theme later from the player's Theme button or menu.
+
+Once per launch, RMP checks published GitHub releases in the background. A newer stable version with a matching platform download opens a release-notes prompt. Choose Update (Yes on Windows) to download, verify the GitHub asset's SHA-256 digest, install and reopen. Choose Not now (No on Windows) to reconsider next launch. Updates require a writable installation folder and network access to GitHub. Install this updater-equipped release manually if upgrading from 2.2 or earlier.

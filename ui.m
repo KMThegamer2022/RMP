@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 #include <stdbool.h>
 #import "mac-theme.h"
+#import "updates/mac.h"
 typedef struct Player Player;
 extern Player *ap_create(void *);
 extern void ap_destroy(Player *),ap_add(Player *,const char *,bool),ap_toggle(Player *),ap_seek(Player *,int64_t),ap_volume(Player *,int);
@@ -152,6 +153,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
  if(pending.count){[self accept:pending];pending=nil;}
  [self refresh:nil];
+ checkMacUpdates();
 }
 -(void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls{
  if(p)[self accept:urls];else{if(!pending)pending=[NSMutableArray new];[pending addObjectsFromArray:urls];}
