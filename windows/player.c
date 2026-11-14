@@ -3,6 +3,7 @@
 #include <commdlg.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <dwmapi.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -28,6 +29,35 @@ static bool fullscreen,dragging,smoke;
 static ULONGLONG deadline;
 static int exitcode;
 static int laststate=-1;
+static HFONT uiFont;
+static HWND volumeLabel;
+static bool glass;
+static int scale(int value){
+ HDC dc=GetDC(mainwin); int dpi=GetDeviceCaps(dc,LOGPIXELSY); ReleaseDC(mainwin,dc);
+ return MulDiv(value,dpi,96);
+}
+static void updateGlass(HWND w){
+ BOOL composed=FALSE;
+ HIGHCONTRASTW contrast={sizeof(contrast)};
+ SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0);
+ glass=SUCCEEDED(DwmIsCompositionEnabled(&composed)) && composed && !(contrast.dwFlags&HCF_HIGHCONTRASTON);
+ MARGINS frame={0,0,glass?scale(12):0,0};
+ if(composed && FAILED(DwmExtendFrameIntoClientArea(w,&frame)))glass=false;
+ InvalidateRect(w,NULL,TRUE);
+}
+static void layout(HWND w,int x,int y){
+ int top=glass?scale(12):0;
+ int deck=y-scale(100),cy=y-scale(55),mid=x/2;
+ MoveWindow(video,0,top,x,max(1,deck-top),TRUE);
+ MoveWindow(position,scale(16),deck+scale(8),x-scale(166),scale(27),TRUE);
+ MoveWindow(clocktext,x-scale(147),deck+scale(6),scale(140),scale(28),TRUE);
+ MoveWindow(GetDlgItem(w,OPEN),scale(16),cy,scale(87),scale(33),TRUE);
+ MoveWindow(GetDlgItem(w,PREV),mid-scale(123),cy,scale(72),scale(33),TRUE);
+ MoveWindow(play,mid-scale(46),cy-scale(4),scale(92),scale(41),TRUE);
+ MoveWindow(GetDlgItem(w,NEXT),mid+scale(51),cy,scale(72),scale(33),TRUE);
+ MoveWindow(volumeLabel,x-scale(170),cy,scale(52),scale(33),TRUE);
+ MoveWindow(level,x-scale(118),cy+scale(4),scale(102),scale(26),TRUE);
+}
 static wchar_t *wide(const char *s){
  int n=MultiByteToWideChar(CP_UTF8,0,s,-1,NULL,0);
  wchar_t *out=calloc(n,sizeof(wchar_t)); if(out)MultiByteToWideChar(CP_UTF8,0,s,-1,out,n);return out;
@@ -60,12 +90,12 @@ static void togglefull(void){
  fullscreen=!fullscreen;
 }
 static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD style){
- HWND h=CreateWindowW(cls,title,WS_CHILD|WS_VISIBLE|style,0,0,10,10,w,(HMENU)(intptr_t)id,GetModuleHandleW(NULL),NULL);SendMessageW(h,WM_SETFONT,(WPARAM)GetStockObject(DEFAULT_GUI_FONT),TRUE);return h;
+ HWND h=CreateWindowW(cls,title,WS_CHILD|WS_VISIBLE|style,0,0,10,10,w,(HMENU)(intptr_t)id,GetModuleHandleW(NULL),NULL);SendMessageW(h,WM_SETFONT,(WPARAM)uiFont,TRUE);return h;
 }
 static void tick(void){
  int s=ap_state(player);if(s==6 && laststate!=6 && ap_index(player)+1<(intptr_t)ap_count(player)){start(ap_index(player)+1);return;}laststate=s;
  int64_t t=ap_time(player),d=ap_length(player);if(t<0)t=0;
- SetWindowTextW(play,s>=1&&s<=3?L"Pause":L"Play");EnableWindow(position,ap_seekable(player)&&d>0);
+ SetWindowTextW(play,s>=1&&s<=3?L"Ⅱ  Pause":L"▶  Play");EnableWindow(position,ap_seekable(player)&&d>0);
  if(!dragging)SendMessageW(position,TBM_SETPOS,TRUE,d>0?t*1000/d:0);
  wchar_t text[100];swprintf(text,100,L"%lld:%02lld / %lld:%02lld",t/60000,t/1000%60,d>0?d/60000:0,d>0?d/1000%60:0);
  SetWindowTextW(clocktext,s==7?L"Playback error":text);
@@ -79,15 +109,20 @@ static HMENU submenu(HMENU parent,const wchar_t *name){
 static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
  case WM_CREATE:{
- mainwin=w;bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
+ mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
+ HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
  queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");SetMenu(w,bar);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|WS_CLIPCHILDREN);player=ap_create(video);if(!player)return -1;
- control(w,L"BUTTON",L"Open",OPEN,0);play=control(w,L"BUTTON",L"Play",PLAY,0);control(w,L"BUTTON",L"Previous",PREV,0);control(w,L"BUTTON",L"Next",NEXT,0);control(w,L"BUTTON",L"Full screen",FULL,0);
+ control(w,L"BUTTON",L"Open file…",OPEN,0);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_DEFPUSHBUTTON);control(w,L"BUTTON",L"Previous",PREV,0);control(w,L"BUTTON",L"Next",NEXT,0);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);return 0;}
- case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){620,340};return 0;
- case WM_SIZE:{int x=LOWORD(lp),y=HIWORD(lp);MoveWindow(video,0,0,x,y-84,TRUE);MoveWindow(position,8,y-80,x-155,30,TRUE);MoveWindow(clocktext,x-145,y-80,140,30,TRUE);
- int ids[]={OPEN,PREV,PLAY,NEXT,FULL};for(int i=0;i<5;i++)MoveWindow(GetDlgItem(w,ids[i]),8+i*86,y-44,82,32,TRUE);MoveWindow(level,x-135,y-42,125,28,TRUE);return 0;}
+ case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
+ case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
+ case WM_DWMCOMPOSITIONCHANGED:case WM_SETTINGCHANGE:case WM_THEMECHANGED:{
+ if(video){RECT r;updateGlass(w);GetClientRect(w,&r);layout(w,r.right,r.bottom);}break;}
+ case WM_ERASEBKGND:{
+ RECT r;GetClientRect(w,&r);FillRect((HDC)wp,&r,GetSysColorBrush(COLOR_BTNFACE));
+ if(glass){r.bottom=scale(12);FillRect((HDC)wp,&r,GetStockObject(BLACK_BRUSH));}return 1;}
  case WM_INITMENUPOPUP:{HMENU m=(HMENU)wp;if(m!=queue&&m!=audio&&m!=subs)break;while(GetMenuItemCount(m)>0)DeleteMenu(m,0,MF_BYPOSITION);
  if(m==queue){for(size_t i=0;i<ap_count(player);i++)track(m,(int)i,basename8(ap_item(player,i)),i==(size_t)ap_index(player));}else ap_tracks(player,m==subs,m,track);return 0;}
  case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else ap_select(player,m==subs,(int)item.dwItemData);return 0;}
@@ -99,7 +134,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }
