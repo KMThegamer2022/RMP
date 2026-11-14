@@ -22,7 +22,7 @@ public class ThemeTest {
  [DllImport("user32")] public static extern bool PrintWindow(IntPtr w,IntPtr dc,uint flags);
  [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out System.Drawing.Rectangle rect);
  [DllImport("user32")] public static extern IntPtr SendMessage(IntPtr w,uint msg,IntPtr wp,IntPtr lp);
- [DllImport("user32",CharSet=CharSet.Unicode)] public static extern bool SetWindowText(IntPtr w,string text);
+ [DllImport("user32",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)] public static extern IntPtr SendText(IntPtr w,uint m,IntPtr p,string text);
  [DllImport("user32")] public static extern IntPtr GetMenu(IntPtr w);
  [DllImport("user32")] public static extern IntPtr GetSubMenu(IntPtr m,int index);
  [DllImport("user32")] public static extern int GetMenuItemCount(IntPtr m);
@@ -53,10 +53,10 @@ try {
    if($before -lt 1){throw 'No real media in the track list'}
    if($id -eq 311){
     $search=[ThemeTest]::GetDlgItem($w,515)
-    [void][ThemeTest]::SetWindowText($search,'does-not-exist-63349')
+    [void][ThemeTest]::SendText($search,12,[IntPtr]::Zero,'does-not-exist-63349')
     $found=[ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero)
     if($found.ToInt32()){throw 'Library search did not filter the rows'}
-    [void][ThemeTest]::SetWindowText($search,'')
+    [void][ThemeTest]::SendText($search,12,[IntPtr]::Zero,'')
    }
   }
   if ($id -in @(311,312,315)) {
