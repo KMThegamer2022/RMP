@@ -48,7 +48,7 @@ jobs:
           $app = "$env:LOCALAPPDATA/Programs/RMP"
           $p = Start-Process "$app/RMP.exe" -ArgumentList '--smoke-test',(Resolve-Path fixture.wav) -PassThru
           if (!$p.WaitForExit(40000) -or $p.ExitCode -ne 0) { throw 'Installed playback failed' }
-          Start-Process "$app/Uninstall.exe" -ArgumentList '/S' -Wait
+          Start-Process "$app/Uninstall.exe" -ArgumentList '/S', "_?=$app" -Wait
           if (Test-Path "$app/RMP.exe") { throw 'Uninstall failed' }
       - uses: actions/upload-artifact@v4
         with:

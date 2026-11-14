@@ -30,7 +30,8 @@ static ULONGLONG deadline;
 static int exitcode;
 static int laststate=-1;
 static HFONT uiFont;
-static HWND volumeLabel;
+static HWND volumeLabel, idleLogo;
+static HICON brandIcon;
 static bool glass;
 static int scale(int value){
  HDC dc=GetDC(mainwin); int dpi=GetDeviceCaps(dc,LOGPIXELSY); ReleaseDC(mainwin,dc);
@@ -49,6 +50,7 @@ static void layout(HWND w,int x,int y){
  int top=glass?scale(12):0;
  int deck=y-scale(100),cy=y-scale(55),mid=x/2;
  MoveWindow(video,0,top,x,max(1,deck-top),TRUE);
+ MoveWindow(idleLogo,(x-scale(96))/2,(deck-top-scale(96))/2,scale(96),scale(96),TRUE);
  MoveWindow(position,scale(16),deck+scale(8),x-scale(166),scale(27),TRUE);
  MoveWindow(clocktext,x-scale(147),deck+scale(6),scale(140),scale(28),TRUE);
  MoveWindow(GetDlgItem(w,OPEN),scale(16),cy,scale(87),scale(33),TRUE);
@@ -70,6 +72,7 @@ static const char *basename8(const char *s){const char *p=s;for(;*s;s++)if(*s=='
 static void start(size_t index){
  if(index>=ap_count(player))return;
  if(!ap_play(player,index)){MessageBoxW(mainwin,L"Could not open this media.",L"RMP",MB_ICONERROR);return;}
+ ShowWindow(idleLogo,SW_HIDE);
  wchar_t *title=wide(basename8(ap_item(player,index)));SetWindowTextW(mainwin,title);free(title);laststate=-1;
 }
 static void openfile(void){
@@ -113,6 +116,9 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
  queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");SetMenu(w,bar);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|WS_CLIPCHILDREN);player=ap_create(video);if(!player)return -1;
+ idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE);
+ brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
+ SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
  control(w,L"BUTTON",L"Open file…",OPEN,0);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_DEFPUSHBUTTON);control(w,L"BUTTON",L"Previous",PREV,0);control(w,L"BUTTON",L"Next",NEXT,0);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);return 0;}
@@ -134,7 +140,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }
