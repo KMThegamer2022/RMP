@@ -51,6 +51,14 @@ jobs:
       - name: Exercise manual update command against GitHub
         shell: pwsh
         run: ./windows/test-update.ps1 ./build/RMP/RMP.exe
+      - name: Measure File menu video opening
+        shell: pwsh
+        run: |
+          curl.exe -fLsS --retry 2 https://github.com/KMThegamer2022/RMP/releases/download/v2.6.3/RMP-Windows-x64.zip -o file-open-baseline.zip
+          7z x -ofile-open-baseline file-open-baseline.zip
+          foreach ($app in @('file-open-baseline/RMP/RMP.exe','build/RMP/RMP.exe')) {
+            ./windows/test-file-open.ps1 $app packaging/fixtures/open-video.mp4
+          }
       - name: Compare launch timings with Windows v1
         shell: pwsh
         run: |
