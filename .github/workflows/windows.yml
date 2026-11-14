@@ -35,7 +35,7 @@ jobs:
           export PATH="/c/mingw64/bin:/c/msys64/mingw64/bin:$PATH"
           rustup target add x86_64-pc-windows-gnu --toolchain stable
           rustc +stable --edition=2021 --target x86_64-pc-windows-gnu examples/check_midi.rs -C link-arg="$(cygpath -am vlc-3.0.24/sdk/lib/libvlc.lib)" -o build/RMP/check_midi.exe
-          build/RMP/check_midi.exe "$(cygpath -am packaging/midi/chord.mid)"
+          build/RMP/check_midi.exe "$(cygpath -aw packaging/midi/chord.mid)"
           rm build/RMP/check_midi.exe
       - name: Exercise packaged playback
         shell: pwsh
