@@ -44,6 +44,15 @@ static bool paintGlassControl(HWND h,HDC dc){
  return SUCCEEDED(result);
 }
 static LRESULT CALLBACK glassControlProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
+ if(h==level && msg==WM_MOUSEWHEEL){
+  static int wheelRemainder;
+  wheelRemainder+=GET_WHEEL_DELTA_WPARAM(wp);
+  int steps=wheelRemainder/WHEEL_DELTA;wheelRemainder%=WHEEL_DELTA;
+  int volume=volumePercent+steps*5;
+  volumePercent=max(0,min(100,volume));
+  SendMessageW(h,TBM_SETPOS,TRUE,volumePercent);ap_volume(player,volumePercent);
+  return 0;
+ }
  if(glass && GetParent(h)==mainwin && (h==position||h==level||h==clocktext||h==volumeLabel)){
   if(msg==WM_ERASEBKGND)return 1;
   if(msg==WM_PAINT){

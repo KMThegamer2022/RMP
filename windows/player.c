@@ -36,6 +36,7 @@ static HFONT uiFont;
 static HWND volumeLabel, idleLogo;
 static HICON brandIcon;
 static bool glass;
+extern void ap_prepare(Player *);
 extern void ap_stop(Player *);
 static HICON coneIcon;
 static int scale(int value){
@@ -116,6 +117,7 @@ static void start(size_t index){
  wchar_t *title=wide(basename8(ap_item(player,index)));SetWindowTextW(mainwin,title);free(title);laststate=-1;
 }
 static void openfile(void){
+ ap_prepare(player);
  wchar_t path[32768]={0};OPENFILENAMEW f={sizeof(f)};f.hwndOwner=mainwin;f.lpstrFilter=L"Media files\0*.*\0";f.lpstrFile=path;f.nMaxFile=32768;f.Flags=OFN_FILEMUSTEXIST|OFN_NOCHANGEDIR;
  if(GetOpenFileNameW(&f)){enqueue(path,false);start(ap_count(player)-1);}
 }
@@ -133,6 +135,7 @@ static void togglefull(void){
  applyTheme(mainwin,skin);if(fullscreen)ShowWindow(transport,SW_SHOWNOACTIVATE);
 }
 static LRESULT CALLBACK videoProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
+ if(msg==WM_LBUTTONDBLCLK){PostMessageW(mainwin,WM_COMMAND,FULL,0);return 0;}
  if(msg==WM_CTLCOLORSTATIC){SetBkColor((HDC)wp,RGB(0,0,0));return (LRESULT)GetStockObject(BLACK_BRUSH);}
  if(msg==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);FillRect(dc,&ps.rcPaint,GetStockObject(BLACK_BRUSH));EndPaint(h,&ps);return 0;}
  return DefSubclassProc(h,msg,wp,lp);}
@@ -161,7 +164,7 @@ static HMENU submenu(HMENU parent,const wchar_t *name){
 }
 #include "caption.h"
 #include "update.h"
-#include "video-click.h"
+
 static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
  case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
@@ -171,8 +174,8 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  AppendMenuW(file,MF_SEPARATOR,0,NULL);AppendMenuW(file,MF_STRING,490,L"Check for Updates…");
  HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
  queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+VLC_THEME,names[VLC_THEME]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+RMP_DEFAULT,names[RMP_DEFAULT]);for(int i=0;i<RMP_DEFAULT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);SetMenu(w,bar);
- video=control(w,L"STATIC",L"",0,SS_BLACKRECT|WS_CLIPCHILDREN);SetWindowSubclass(video,videoProc,1,0);player=ap_create(video);if(!player)return -1;
- idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE);
+ video=control(w,L"STATIC",L"",0,SS_BLACKRECT|SS_NOTIFY|WS_CLIPCHILDREN);SetWindowSubclass(video,videoProc,1,0);player=ap_create(video);if(!player)return -1;
+ idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE|WS_DISABLED);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
  control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
@@ -183,7 +186,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
- case WM_INPUT:videoMouseInput((HRAWINPUT)lp);break;
+
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
  case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
  case WM_DWMCOMPOSITIONCHANGED:case WM_SETTINGCHANGE:case WM_THEMECHANGED:{
@@ -271,7 +274,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
  WNDCLASSW c={0};c.lpfnWndProc=windowproc;c.hInstance=h;c.lpszClassName=L"RMPPlayer";c.hIcon=LoadIconW(h,MAKEINTRESOURCEW(1));c.hCursor=LoadCursor(NULL,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&c);
  WNDCLASSW floating={0};floating.lpfnWndProc=transportProc;floating.hInstance=h;floating.lpszClassName=L"RMPTransport";floating.hCursor=c.hCursor;RegisterClassW(&floating);
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
- RAWINPUTDEVICE mouse={1,2,0,w};RegisterRawInputDevices(&mouse,1,sizeof(mouse));
+
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
  ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
 }

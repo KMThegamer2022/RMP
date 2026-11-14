@@ -18,6 +18,10 @@ extern "C" {
     fn libvlc_media_release(m: Handle);
     fn libvlc_media_player_set_media(p: Handle, m: Handle);
     #[cfg(windows)]
+    fn libvlc_video_set_mouse_input(p: Handle, enabled: u32);
+    #[cfg(windows)]
+    fn libvlc_video_set_key_input(p: Handle, enabled: u32);
+    #[cfg(windows)]
     fn libvlc_media_player_set_hwnd(p: Handle, v: Handle);
     #[cfg(target_os = "macos")]
     fn libvlc_media_player_set_nsobject(p: Handle, v: Handle);
@@ -39,6 +43,7 @@ extern "C" {
     fn libvlc_video_get_spu(p: Handle) -> i32;
 }
 pub struct Player {
+    warming: Option<std::thread::JoinHandle<Engine>>,
     view: Handle,
     engine: Handle,
     player: Handle,
@@ -49,6 +54,7 @@ pub struct Player {
 #[no_mangle]
 pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
     Box::into_raw(Box::new(Player {
+        warming: None,
         view,
         engine: ptr::null_mut(),
         player: ptr::null_mut(),
@@ -57,10 +63,22 @@ pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
         volume: 80,
     }))
 }
-unsafe fn ensure_engine(p: &mut Player) -> bool {
-    if !p.player.is_null() {
-        return true;
+// The worker creates an independent LibVLC instance and transfers its sole
+// reference to the UI thread; it never accesses the player or its view.
+struct Engine(Handle);
+unsafe impl Send for Engine {}
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if !self.0.is_null() { unsafe { libvlc_release(self.0) } }
     }
+}
+#[no_mangle]
+pub extern "C" fn ap_prepare(p: &mut Player) {
+    if p.player.is_null() && p.warming.is_none() {
+        p.warming = std::thread::Builder::new().spawn(|| unsafe { create_engine() }).ok();
+    }
+}
+unsafe fn create_engine() -> Engine {
     let mut args = vec![
         c"--no-video-title-show".as_ptr(),
         c"--ignore-config".as_ptr(),
@@ -81,7 +99,15 @@ unsafe fn ensure_engine(p: &mut Player) -> bool {
     if let Some(bank) = &soundfont {
         args.push(bank.as_ptr());
     }
-    let engine = libvlc_new(args.len() as i32, args.as_ptr());
+    Engine(libvlc_new(args.len() as i32, args.as_ptr()))
+}
+unsafe fn ensure_engine(p: &mut Player) -> bool {
+    if !p.player.is_null() {
+        return true;
+    }
+    let instance = p.warming.take().and_then(|task| task.join().ok()).unwrap_or_else(|| create_engine());
+    let engine = instance.0;
+    std::mem::forget(instance);
     if engine.is_null() {
         return false;
     }
@@ -91,7 +117,11 @@ unsafe fn ensure_engine(p: &mut Player) -> bool {
         return false;
     }
     #[cfg(windows)]
-    libvlc_media_player_set_hwnd(player, p.view);
+    {
+        libvlc_video_set_mouse_input(player, 0);
+        libvlc_video_set_key_input(player, 0);
+        libvlc_media_player_set_hwnd(player, p.view);
+    }
     #[cfg(target_os = "macos")]
     libvlc_media_player_set_nsobject(player, p.view);
     p.engine = engine;

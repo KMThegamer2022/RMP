@@ -3,6 +3,7 @@
 #import "mac-theme.h"
 #import "updates/mac.h"
 typedef struct Player Player;
+extern void ap_prepare(Player *);
 extern void ap_stop(Player *);
 extern Player *ap_create(void *);
 extern void ap_destroy(Player *),ap_add(Player *,const char *,bool),ap_toggle(Player *),ap_seek(Player *,int64_t),ap_volume(Player *,int);
@@ -206,6 +207,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  seek.doubleValue=d>0?(double)t/d:0;clockLabel.stringValue=[NSString stringWithFormat:@"%@ / %@",stamp(t),d>0?stamp(d):@"—"];[self refreshFloating];
 }
 -(void)open:(id)s{
+ ap_prepare(p);
  NSOpenPanel *picker=[NSOpenPanel openPanel];picker.allowsMultipleSelection=YES;
  if([picker runModal]==NSModalResponseOK)[self accept:picker.URLs];
 }
