@@ -1,4 +1,4 @@
-enum { CAP_MIN=410,CAP_MAX,CAP_CLOSE };
+enum { CAP_MIN=410,CAP_MAX,CAP_CLOSE,CAP_MENU };
 static bool sevenFrame(void){return skin==SEVEN&&!contrastMode&&!fullscreen;}
 static void sevenSurface(HDC dc,HWND child){
  RECT area;GetClientRect(mainwin,&area);
@@ -6,6 +6,8 @@ static void sevenSurface(HDC dc,HWND child){
  int save=SaveDC(dc);SetViewportOrgEx(dc,-offset.x,-offset.y,NULL);
  fillColor(dc,area,color(0xbdd4e7));
  RECT top=area;top.bottom=scale(32);blend(dc,top,0xeaf6ff,0x9bbbd4);
+ RECT command=area;command.top=scale(32);command.bottom=scale(56);
+ blend(dc,command,0xf9fcff,0xdce7f2);
  RECT deck=area;deck.top=deck.bottom-scale(100);
  RECT upper=deck;upper.bottom=deck.top+scale(34);blend(dc,upper,0xf7fcff,0xe5eff8);
  deck.top=upper.bottom;blend(dc,deck,0xddebf7,0xc8daeb);

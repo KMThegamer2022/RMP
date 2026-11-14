@@ -40,11 +40,13 @@ static int scale(int value){
 #include "theme.h"
 #include "backdrop.h"
 static void layout(HWND w,int x,int y){
- int top=skin==XP?scale(27):sevenFrame()?scale(32):0;
+ int top=skin==XP?scale(27):sevenFrame()?scale(56):0;
  int frame=skin==XP?scale(4):skin==SEVEN?scale(6):0;
  int deck=y-scale(100),cy=y-scale(55),mid=x/2;
  int buttons[]={CAP_MIN,CAP_MAX,CAP_CLOSE};int left=x-scale(111);
  for(int i=0;i<3;i++){HWND b=GetDlgItem(w,buttons[i]);int width=scale(i==2?46:29);if(b){ShowWindow(b,sevenFrame()?SW_SHOWNA:SW_HIDE);MoveWindow(b,left,0,width,scale(21),TRUE);}left+=width;}
+ HWND menuButton=GetDlgItem(w,CAP_MENU);
+ if(menuButton){ShowWindow(menuButton,sevenFrame()?SW_SHOWNA:SW_HIDE);MoveWindow(menuButton,scale(7),scale(32),scale(69),scale(23),TRUE);}
  MoveWindow(video,frame,top,x-2*frame,max(1,deck-top),TRUE);
  MoveWindow(idleLogo,(x-scale(96))/2,(deck-top-scale(96))/2,scale(96),scale(96),TRUE);
  MoveWindow(position,scale(16),deck+scale(8),x-scale(166),scale(27),TRUE);
@@ -63,6 +65,7 @@ static void applyTheme(HWND w,int value){
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
  if(!fullscreen){
+ HMENU visibleMenu=sevenFrame()?NULL:bar;if(GetMenu(w)!=visibleMenu)SetMenu(w,visibleMenu);
  LONG_PTR style=GetWindowLongPtrW(w,GWL_STYLE);
  LONG_PTR wanted=sevenFrame()?style&~WS_CAPTION:style|WS_CAPTION;
  if(wanted!=style){SetWindowLongPtrW(w,GWL_STYLE,wanted);SetWindowPos(w,NULL,0,0,0,0,SWP_FRAMECHANGED|SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_NOACTIVATE);}
@@ -145,7 +148,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  }return hit;}
  case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
  LRESULT result=DefWindowProcW(w,msg,wp,lp);
- if(brandIcon)paintCaption(w);
+ if(brandIcon && !sevenFrame())paintCaption(w);if(msg==WM_SETTEXT && sevenFrame())InvalidateRect(w,NULL,TRUE);
  return result;}
  case WM_CREATE:{
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
@@ -156,7 +159,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
  control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);control(w,L"BUTTON",L"Theme ▾",THEME_BUTTON,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
- control(w,L"BUTTON",L"Minimize",CAP_MIN,BS_OWNERDRAW);control(w,L"BUTTON",L"Maximize or restore",CAP_MAX,BS_OWNERDRAW);control(w,L"BUTTON",L"Close",CAP_CLOSE,BS_OWNERDRAW);
+ control(w,L"BUTTON",L"Menu  ▾",CAP_MENU,BS_OWNERDRAW);control(w,L"BUTTON",L"Minimize",CAP_MIN,BS_OWNERDRAW);control(w,L"BUTTON",L"Maximize or restore",CAP_MAX,BS_OWNERDRAW);control(w,L"BUTTON",L"Close",CAP_CLOSE,BS_OWNERDRAW);
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
@@ -207,7 +210,12 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_COMMAND:
  if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;applyTheme(w,value);storeTheme(value);return 0;}
  if(LOWORD(wp)==THEME_BUTTON){RECT r;GetWindowRect(GetDlgItem(w,THEME_BUTTON),&r);TrackPopupMenu(themeMenu,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);return 0;}
- switch(LOWORD(wp)){case CAP_MIN:ShowWindow(w,SW_MINIMIZE);break;case CAP_MAX:ShowWindow(w,IsZoomed(w)?SW_RESTORE:SW_MAXIMIZE);break;case CAP_CLOSE:PostMessageW(w,WM_CLOSE,0,0);break;case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:start(ap_index(player)+1);break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
+ switch(LOWORD(wp)){case CAP_MENU:{RECT r;GetWindowRect(GetDlgItem(w,CAP_MENU),&r);
+ HMENU popup=CreatePopupMenu();int count=GetMenuItemCount(bar);
+ for(int i=0;i<count;i++){wchar_t title[80];GetMenuStringW(bar,i,title,80,MF_BYPOSITION);AppendMenuW(popup,MF_POPUP,(UINT_PTR)GetSubMenu(bar,i),title);}
+ TrackPopupMenu(popup,TPM_LEFTALIGN,r.left,r.bottom,0,w,NULL);
+ while(GetMenuItemCount(popup)>0)RemoveMenu(popup,0,MF_BYPOSITION);DestroyMenu(popup);break;}
+ case CAP_MIN:ShowWindow(w,SW_MINIMIZE);break;case CAP_MAX:ShowWindow(w,IsZoomed(w)?SW_RESTORE:SW_MAXIMIZE);break;case CAP_CLOSE:PostMessageW(w,WM_CLOSE,0,0);break;case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:start(ap_index(player)+1);break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
  case WM_HSCROLL:if((HWND)lp==level)ap_volume(player,SendMessageW(level,TBM_GETPOS,0,0));else if((HWND)lp==position){dragging=LOWORD(wp)==TB_THUMBTRACK;if(!dragging)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
  case WM_TIMER:
  tick();

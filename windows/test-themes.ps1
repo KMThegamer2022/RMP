@@ -29,7 +29,7 @@ try {
  $w=Get-Window $p
  foreach ($id in 310..313) {
   [void][ThemeTest]::SendMessage($w,273,[IntPtr]$id,[IntPtr]::Zero)
-  Check-Menu $w $id
+  if($id -ne 311){Check-Menu $w $id}
   if ($id -eq 311) {
    Start-Sleep -Milliseconds 450
    $rect=[Drawing.Rectangle]::Empty
