@@ -10,6 +10,7 @@ static const WCHAR *sectionTitle(void){
  return browserPage==NAV_LIBRARY?L"Media Library":browserPage==NAV_QUEUE?L"Current Playlist":L"Now Playing";
 }
 static bool mediaTheme(void){return skin==XP||skin==SEVEN;}
+#include "media-details.h"
 static void setBrowserPart(HWND h,bool visible,int x,int y,int width,int height){
  if(!h)return;
  if(visible)MoveWindow(h,x,y,max(1,width),max(1,height),TRUE);
@@ -23,11 +24,11 @@ static void makeMediaBrowser(void){
  mediaFilter=CreateWindowExW(WS_EX_CLIENTEDGE,L"EDIT",L"",WS_CHILD|WS_TABSTOP|ES_AUTOHSCROLL,
   0,0,1,1,mainwin,(HMENU)(INT_PTR)FILTER,GetModuleHandleW(NULL),NULL);
  SendMessageW(mediaFilter,EM_SETCUEBANNER,TRUE,(LPARAM)L"Search tracks");
- mediaRows=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"Tracks",WS_CHILD|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,
+ mediaRows=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"Tracks",WS_CHILD|WS_TABSTOP|LVS_SHAREIMAGELISTS|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,
   0,0,1,1,mainwin,(HMENU)(INT_PTR)TRACKS,GetModuleHandleW(NULL),NULL);
  ListView_SetExtendedListViewStyle(mediaRows,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);
- const WCHAR *columns[]={L"Title",L"Type",L"Location"};
- for(int i=0;i<3;i++){
+ const WCHAR *columns[]={L"Title",L"Album",L"Artist",L"Length",L"Type"};
+ for(int i=0;i<5;i++){
   LVCOLUMNW col={0};col.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_SUBITEM;col.iSubItem=i;
   col.cx=scale(i==0?230:100);col.pszText=(WCHAR*)columns[i];
   SendMessageW(mediaRows,LVM_INSERTCOLUMNW,i,(LPARAM)&col);
@@ -70,18 +71,18 @@ static void rebuildMediaRows(void){
   WCHAR *title=path;
   for(WCHAR *p=path;*p;p++)if(*p==L'\\'||*p==L'/')title=p+1;
   if(containsTitle(path,query)){
-   LVITEMW row={0};row.mask=LVIF_TEXT|LVIF_PARAM;row.iItem=ListView_GetItemCount(mediaRows);
+   LVITEMW row={0};row.mask=LVIF_TEXT|LVIF_PARAM|LVIF_IMAGE;row.iItem=ListView_GetItemCount(mediaRows);
    row.pszText=*title?title:path;row.lParam=(LPARAM)i;
    int item=(int)SendMessageW(mediaRows,LVM_INSERTITEMW,0,(LPARAM)&row);
    if(item>=0){
     WCHAR *extension=wcsrchr(title,L'.');
-    row.iItem=item;row.iSubItem=1;row.pszText=wcsstr(path,L"://")?L"Stream":extension&&extension[1]?extension+1:L"File";
+    row.iItem=item;row.iSubItem=4;row.pszText=wcsstr(path,L"://")?L"Stream":extension&&extension[1]?extension+1:L"File";
     SendMessageW(mediaRows,LVM_SETITEMTEXTW,item,(LPARAM)&row);
-    row.iSubItem=2;row.pszText=path;SendMessageW(mediaRows,LVM_SETITEMTEXTW,item,(LPARAM)&row);
    }
   }
   free(path);
  }
+ resetDetails();
  SendMessageW(mediaRows,WM_SETREDRAW,TRUE,0);
  InvalidateRect(mediaRows,NULL,TRUE);lastQueueMark=-2;markPlayingInQueue();
 }
@@ -110,9 +111,9 @@ static void layoutMediaBrowser(int width,int deck){
  setBrowserPart(mediaRows,table,listLeft,listTop,width-listLeft-scale(5),deck-listTop-scale(5));
  if(table){
   int area=width-listLeft-scale(12);
-  ListView_SetColumnWidth(mediaRows,0,playing?area:max(scale(110),area*43/100));
-  ListView_SetColumnWidth(mediaRows,1,playing?0:scale(74));
-  ListView_SetColumnWidth(mediaRows,2,playing?0:max(scale(70),area-area*43/100-scale(80)));
+  int usable=area-scale(127),title=usable*40/100,album=usable*30/100;
+  int widths[]={title,album,usable-title-album,scale(61),scale(52)};
+  for(int i=0;i<5;i++)ListView_SetColumnWidth(mediaRows,i,playing?(i==0?area:0):widths[i]);
  }
  if(visible){
   setBrowserPart(video,playing,rail+scale(3),bodyTop+scale(2),width-rail-queueWidth-scale(9),deck-bodyTop-scale(7));
@@ -146,7 +147,13 @@ static void playlistFile(bool save){
  WideCharToMultiByte(CP_UTF8,0,filename,-1,path,bytes,NULL,NULL);
  bool ok=save?ap_playlist_save(player,path):ap_playlist_load(player,path);free(path);
  if(!ok)MessageBoxW(mainwin,save?L"Could not save this playlist.":L"Could not read this playlist.",L"RMP",MB_ICONERROR);
- else if(!save){if(ap_count(player))start(0);else showMediaPage(NAV_QUEUE);}
+ else if(!save){
+  if(ap_count(player))start(0);
+  else{
+   laststate=-1;SetWindowTextW(mainwin,L"RMP · Rust Media Player");
+   ShowWindow(idleLogo,SW_SHOWNA);showMediaPage(NAV_QUEUE);
+  }
+ }
 }
 static void styleMediaRows(void){
  if(!mediaRows||!mediaTheme())return;

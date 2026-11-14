@@ -1,8 +1,13 @@
 #define _UNICODE
+#define COBJMACROS
 #include <windows.h>
 #include <commdlg.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <shobjidl.h>
+#include <propvarutil.h>
+#include <initguid.h>
+#include <propkey.h>
 #include <dwmapi.h>
 #include <uxtheme.h>
 #include <vssym32.h>
@@ -172,7 +177,7 @@ static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD 
 static void nextItem(void){size_t n=ap_count(player);size_t i=ap_index(player)+1;if(shuffle&&n>1)i=(i+(size_t)(GetTickCount64()%(n-1)))%n;start(i);}
 static void tick(void){
  updateTransport();
- if(mediaTheme())markPlayingInQueue();
+ if(mediaTheme()){markPlayingInQueue();requestVisibleDetails();}
  if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);SetWindowTextW(volumeLabel,percent);}
  else SetWindowTextW(volumeLabel,L"Volume");
  int s=ap_state(player);
@@ -229,6 +234,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  else if(mediaTheme())paintMediaSurface(dc,r);
  else fillColor(dc,r,color(t.panel));
  return 1;}
+ case MEDIA_DETAILS_READY:receiveMediaDetails((MediaDetails*)lp);return 0;
  case WM_NOTIFY:{
  NMHDR *notice=(NMHDR *)lp;
  if(notice->hwndFrom==mediaRows && notice->code==LVN_GETEMPTYMARKUP){
@@ -302,7 +308,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:for(int i=0;i<9;i++)if(sevenIcons[i])DestroyIcon(sevenIcons[i]);KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:clearDetails();for(int i=0;i<9;i++)if(sevenIcons[i])DestroyIcon(sevenIcons[i]);KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }

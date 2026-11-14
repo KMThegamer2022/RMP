@@ -11,7 +11,7 @@ rc=${WINDRES:-x86_64-w64-mingw32-windres}
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml)
 "$cc" "-DRMP_VERSION=L\"$version\"" -Wall -O2 -municode -mwindows -static windows/player.c "$out/icon.o" \
  "${CARGO_TARGET_DIR:-target}/x86_64-win7-windows-gnu/release/librmp.a" "$runtime/sdk/lib/libvlc.lib" \
- -luxtheme -lmsimg32 -ladvapi32 -ldwmapi -lcomctl32 -lcomdlg32 -lshell32 -luserenv -lws2_32 -lntdll -lbcrypt -o "$out/RMP.exe"
+ -lole32 -lpropsys -luuid -luxtheme -lmsimg32 -ladvapi32 -ldwmapi -lcomctl32 -lcomdlg32 -lshell32 -luserenv -lws2_32 -lntdll -lbcrypt -o "$out/RMP.exe"
 rm "$out/icon.o"
 cp updates/windows.ps1 "$out/update.ps1"
 cp "$runtime"/*.dll "$out/"
