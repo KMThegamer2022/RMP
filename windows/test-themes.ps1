@@ -59,4 +59,12 @@ try {
  [void][ThemeTest]::SendMessage($w,273,[IntPtr]105,[IntPtr]::Zero)
 } finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
 $p=Start-Process $Player -PassThru
-try {Check-Menu (Get-Window $p) 315} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
+try {
+ $w=Get-Window $p;Check-Menu $w 315
+ [void][ThemeTest]::SetWindowPos($w,[IntPtr](-1),10,10,900,570,0x40)
+ Start-Sleep -Milliseconds 700
+ $rect=[Drawing.Rectangle]::Empty;[void][ThemeTest]::GetWindowRect($w,[ref]$rect)
+ $bmp=[Drawing.Bitmap]::new($rect.Width-$rect.X,$rect.Height-$rect.Y)
+ $g=[Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($rect.X,$rect.Y,0,0,$bmp.Size)
+ $bmp.Save((Join-Path $pwd 'RMP-VLC-preview.png'));$g.Dispose();$bmp.Dispose()
+} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}

@@ -26,6 +26,7 @@ static HMENU queue,audio,subs,bar;
 static Player *player;
 static WINDOWPLACEMENT placement={sizeof(WINDOWPLACEMENT)};
 static bool fullscreen,dragging,smoke,repeatOne,shuffle;
+static int volumePercent=80;
 static ULONGLONG deadline;
 static int exitcode;
 static int laststate=-1;
@@ -100,6 +101,7 @@ static void applyTheme(HWND w,int value){
 
  RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
  RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_ERASE|RDW_ALLCHILDREN);
+ InvalidateRect(level,NULL,TRUE);InvalidateRect(position,NULL,TRUE);
 }
 static wchar_t *wide(const char *s){
  int n=MultiByteToWideChar(CP_UTF8,0,s,-1,NULL,0);
@@ -143,6 +145,8 @@ static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD 
 static void nextItem(void){size_t n=ap_count(player);size_t i=ap_index(player)+1;if(shuffle&&n>1)i=(i+(size_t)(GetTickCount64()%(n-1)))%n;start(i);}
 static void tick(void){
  updateTransport();
+ if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);SetWindowTextW(volumeLabel,percent);}
+ else SetWindowTextW(volumeLabel,L"Volume");
  int s=ap_state(player);if(s==6 && laststate!=6){if(repeatOne){start(ap_index(player));return;}if(shuffle||ap_index(player)+1<(intptr_t)ap_count(player)){nextItem();return;}}laststate=s;
  int64_t t=ap_time(player),d=ap_length(player);if(t<0)t=0;
  SetWindowTextW(play,s>=1&&s<=3?L"Ⅱ  Pause":L"▶  Play");EnableWindow(position,ap_seekable(player)&&d>0);
@@ -205,6 +209,13 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  HRGN triangle=CreatePolygonRgn(points,3,WINDING);int save=SaveDC(draw->hdc);ExtSelectClipRgn(draw->hdc,triangle,RGN_AND);
  fillColor(draw->hdc,r,color(0xe0e0e0));RECT filled=r;filled.right=r.left+MulDiv(r.right-r.left,SendMessageW(level,TBM_GETPOS,0,0),100);fillColor(draw->hdc,filled,color(0x48c638));RestoreDC(draw->hdc,save);
  SetDCBrushColor(draw->hdc,color(0x777777));FrameRgn(draw->hdc,triangle,GetStockObject(DC_BRUSH),1,1);DeleteObject(triangle);return CDRF_SKIPDEFAULT;}
+ if(draw->dwDrawStage==CDDS_PREPAINT && skin==VLC_THEME && notice->hwndFrom==position){
+ RECT r;GetClientRect(position,&r);fillColor(draw->hdc,r,color(themes[skin].panel));
+ RECT track=r;InflateRect(&track,-scale(5),0);int mid=(track.top+track.bottom)/2;track.top=mid-scale(3);track.bottom=mid+scale(3);
+ blend(draw->hdc,track,0xa6a6a6,0xe4e4e4);if(IsWindowEnabled(position)){
+ int xpos=track.left+MulDiv(track.right-track.left,SendMessageW(position,TBM_GETPOS,0,0),1000);
+ RECT thumb={xpos-scale(3),mid-scale(6),xpos+scale(3),mid+scale(6)};blend(draw->hdc,thumb,0xffffff,0xa0a0a0);}
+ return CDRF_SKIPDEFAULT;}
  if(draw->dwDrawStage==CDDS_PREPAINT){if(skin==SEVEN)sevenSurface(draw->hdc,notice->hwndFrom);return CDRF_NOTIFYITEMDRAW;}
  if(draw->dwDrawStage==CDDS_ITEMPREPAINT){
  RECT r=draw->rc;Theme t=themes[skin];
@@ -237,7 +248,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
  case SHUFFLE:shuffle=!shuffle;SetWindowTextW((HWND)lp,shuffle?L"⤨✓":L"⤨");break;
  case STOP:ap_stop(player);break;case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:nextItem();break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
- case WM_HSCROLL:if((HWND)lp==level)ap_volume(player,SendMessageW(level,TBM_GETPOS,0,0));else if((HWND)lp==position){dragging=LOWORD(wp)==TB_THUMBTRACK;if(!dragging)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
+ case WM_HSCROLL:if((HWND)lp==level){volumePercent=SendMessageW(level,TBM_GETPOS,0,0);ap_volume(player,volumePercent);InvalidateRect(level,NULL,TRUE);}else if((HWND)lp==position){dragging=LOWORD(wp)==TB_THUMBTRACK;if(!dragging)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
  case WM_TIMER:
  tick();
  if(smoke && ((ap_state(player)==3 && ap_time(player)>100) || GetTickCount64()>deadline)){
