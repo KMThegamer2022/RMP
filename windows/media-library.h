@@ -190,10 +190,14 @@ static void paintBrowserButton(DRAWITEMSTRUCT *d){
 static void paintMediaSurface(HDC dc,RECT r){
  bool xp=skin==XP;int rail=scale(xp?124:148),heading=scale(xp?40:42),deck=r.bottom-scale(MEDIA_TRANSPORT_HEIGHT);
  fillColor(dc,r,color(xp?0x6472a1:0xe7f0f9));
- RECT head={0,0,r.right,heading};blend(dc,head,xp?0xf4f6ff:0xf8fbff,xp?0x7587bc:0xdae6f3);
+ RECT head={0,0,r.right,heading};blend(dc,head,xp?0x2e80e7:0xf8fbff,xp?0x0b3e9b:0xdae6f3);
+ if(xp){
+  RECT edge=head;edge.top=edge.bottom-scale(7);blend(dc,edge,0x8294b6,0xe4eefb);
+  edge.top=edge.bottom-scale(2);fillColor(dc,edge,color(0x6f83ad));
+ }
  RECT title=head;title.left=scale(14);
  WCHAR breadcrumb[128];swprintf(breadcrumb,128,xp?L"RMP   •   %ls":L"Library   ›   %ls",sectionTitle());
- textIn(dc,title,breadcrumb,color(0x153158),DT_LEFT);
+ textIn(dc,title,breadcrumb,xp?RGB(255,255,255):color(0x153158),DT_LEFT);
  int top=heading;
  if(!xp){RECT barrect={0,heading,r.right,heading+scale(36)};blend(dc,barrect,0xf3f8fd,0xd9e6f3);top=barrect.bottom;}
  RECT nav={scale(xp?4:0),top,rail,deck};blend(dc,nav,xp?0xc1d3ef:0xe6eff8,xp?0x6e81b8:0xe6eff8);
@@ -225,8 +229,16 @@ static void layoutClassicTransport(HWND host,int width,int deck){
  MoveWindow(position,scale(9),deck+scale(2),width-scale(140),scale(24),TRUE);
  MoveWindow(clocktext,width-scale(126),deck+scale(2),scale(122),scale(24),TRUE);
 }
+static void xpControlBackdrop(HWND control,HDC dc){
+ HWND parent=GetParent(control);
+ RECT client,controlRect;GetClientRect(parent,&client);GetClientRect(control,&controlRect);
+ POINT origin={0,0};MapWindowPoints(control,parent,&origin,1);
+ RECT footer={-origin.x,client.bottom-scale(MEDIA_TRANSPORT_HEIGHT)-origin.y,client.right-origin.x,client.bottom-origin.y};
+ blend(dc,footer,0x8594ba,0xe1eaf8);
+ RECT shine=footer;shine.bottom=shine.top+scale(8);blend(dc,shine,0xfafcff,0xb5c5e1);
+}
 static void paintXpTransport(DRAWITEMSTRUCT *d){
- RECT r=d->rcItem;HDC dc=d->hDC;fillColor(dc,r,color(0xc5d1e7));InflateRect(&r,-1,-1);
+ RECT r=d->rcItem;HDC dc=d->hDC;xpControlBackdrop(d->hwndItem,dc);InflateRect(&r,-1,-1);
  HRGN oval=CreateEllipticRgnIndirect(&r);
  int saved=SaveDC(dc);ExtSelectClipRgn(dc,oval,RGN_AND);
  blend(dc,r,0xfefefe,(d->itemState&ODS_SELECTED)?0x91a7c5:0x91aac2);

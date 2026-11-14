@@ -60,6 +60,7 @@ extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const cha
 static wchar_t *wide(const char *);
 static void start(size_t),showCurrentTrack(void),layout(HWND,int,int);
 #include "media-library.h"
+#include "transport-labels.h"
 /* Older Windows versions route wheel input to the focus owner. Follow the
    pointer over the volume control even when a child such as the queue has focus. */
 static bool routeWheel(HWND target,WPARAM direction,LPARAM location){
@@ -110,7 +111,7 @@ static void applyTheme(HWND w,int value){
  bool changing=value!=skin;
  skin=value;
  if(changing){awaitingVideo=false;if(mediaTheme())browserPage=skin==XP?NAV_NOW:NAV_LIBRARY;}
- if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(themes[skin].panel));
+ if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(skin==XP?0xc8d5e8:themes[skin].panel));
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
  HWND host=fullscreen?transport:w;
@@ -191,11 +192,15 @@ static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD 
  return h;
 }
 static void nextItem(void){size_t n=ap_count(player);size_t i=ap_index(player)+1;if(shuffle&&n>1)i=(i+(size_t)(GetTickCount64()%(n-1)))%n;start(i);}
+static void setTransportText(HWND control,const WCHAR *text){
+ WCHAR old[100];GetWindowTextW(control,old,100);
+ if(lstrcmpW(old,text))SetWindowTextW(control,text);
+}
 static void tick(void){
  updateTransport();
  if(mediaTheme()){markPlayingInQueue();requestVisibleDetails();beginTagSearch();}
- if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);SetWindowTextW(volumeLabel,percent);}
- else SetWindowTextW(volumeLabel,L"Volume");
+ if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);setTransportText(volumeLabel,percent);}
+ else setTransportText(volumeLabel,L"Volume");
  int s=ap_state(player);
  if(awaitingVideo){
   if(ap_has_video(player))showMediaPage(NAV_NOW);
@@ -206,7 +211,7 @@ static void tick(void){
  SetWindowTextW(play,s>=1&&s<=3?L"Ⅱ  Pause":L"▶  Play");EnableWindow(position,ap_seekable(player)&&d>0);
  if(!dragging)SendMessageW(position,TBM_SETPOS,TRUE,d>0?t*1000/d:0);
  wchar_t text[100];swprintf(text,100,L"%lld:%02lld / %lld:%02lld",t/60000,t/1000%60,d>0?d/60000:0,d>0?d/1000%60:0);
- SetWindowTextW(clocktext,s==7?L"Playback error":text);
+ setTransportText(clocktext,s==7?L"Playback error":text);
 }
 static void track(void *menu,int id,const char *name,bool selected){
  HMENU m=menu;wchar_t *title=wide(name);MENUITEMINFOW i={sizeof(i)};i.fMask=MIIM_STRING|MIIM_DATA|MIIM_STATE;i.dwTypeData=title;i.dwItemData=(ULONG_PTR)(intptr_t)id;i.fState=selected?MFS_CHECKED:MFS_UNCHECKED;InsertMenuItemW(m,GetMenuItemCount(m),TRUE,&i);free(title);
@@ -214,13 +219,12 @@ static void track(void *menu,int id,const char *name,bool selected){
 static HMENU submenu(HMENU parent,const wchar_t *name){
  HMENU m=CreatePopupMenu();AppendMenuW(parent,MF_POPUP,(UINT_PTR)m,name);MENUINFO info={sizeof(info),MIM_STYLE,MNS_NOTIFYBYPOS};SetMenuInfo(m,&info);return m;
 }
-#include "caption.h"
+
 #include "update.h"
 
 static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
- case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
- LRESULT result=DefWindowProcW(w,msg,wp,lp);if(brandIcon&&skin==XP)paintCaption(w);return result;}
+
  case WM_CREATE:{
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
  AppendMenuW(file,MF_SEPARATOR,0,NULL);AppendMenuW(file,MF_STRING,490,L"Check for Updates…");
@@ -230,13 +234,13 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE|WS_DISABLED);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
- control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
+ control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_OWNERDRAW);
  coneIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(2),IMAGE_ICON,scale(120),scale(120),0);
  control(w,L"BUTTON",L"☷",LIST,BS_OWNERDRAW);control(w,L"BUTTON",L"↻",REPEAT,BS_OWNERDRAW);control(w,L"BUTTON",L"⤨",SHUFFLE,BS_OWNERDRAW);
  control(w,L"BUTTON",L"■",STOP,BS_OWNERDRAW);control(w,L"BUTTON",L"⛶",FULL,BS_OWNERDRAW);
  transport=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"RMPTransport",L"Playback controls",WS_POPUP|WS_BORDER|WS_CLIPCHILDREN,0,0,1,1,w,NULL,GetModuleHandleW(NULL),NULL);
 
- position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
+ position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_OWNERDRAW);
  makeMediaBrowser();
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
@@ -266,6 +270,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  }
  if(!contrastMode && skin!=MAC && skin!=SEVEN && notice->code==NM_CUSTOMDRAW && (notice->hwndFrom==position||notice->hwndFrom==level)){
  NMCUSTOMDRAW *draw=(NMCUSTOMDRAW *)lp;
+ if(draw->dwDrawStage==CDDS_PREPAINT && skin==XP){xpControlBackdrop(notice->hwndFrom,draw->hdc);return CDRF_NOTIFYITEMDRAW;}
  if(draw->dwDrawStage==CDDS_PREPAINT && skin==VLC_THEME && notice->hwndFrom==level){
  RECT r;GetClientRect(level,&r);fillColor(draw->hdc,r,color(themes[skin].panel));InflateRect(&r,-3,-3);
  POINT points[]={{r.left,r.bottom},{r.right,r.top},{r.right,r.bottom}};
@@ -294,7 +299,9 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  return CDRF_SKIPDEFAULT;}
  }}
  break;}
- case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){
+ case WM_DRAWITEM:
+ if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_STATIC){paintTransportLabel((DRAWITEMSTRUCT*)lp);return TRUE;}
+ if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){
  int id=((DRAWITEMSTRUCT*)lp)->CtlID;
  if(id>=NAV_NOW && id<=ADD_FILE)paintBrowserButton((DRAWITEMSTRUCT*)lp);
  else if(skin==XP && !contrastMode)paintXpTransport((DRAWITEMSTRUCT*)lp);
