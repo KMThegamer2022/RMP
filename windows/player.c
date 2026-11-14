@@ -38,18 +38,7 @@ static int scale(int value){
  return MulDiv(value,dpi,96);
 }
 #include "theme.h"
-static void updateGlass(HWND w){
- BOOL composed=FALSE;
- HIGHCONTRASTW contrast={sizeof(contrast)};
- SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0);
- contrastMode=(contrast.dwFlags&HCF_HIGHCONTRASTON)!=0;
- DwmIsCompositionEnabled(&composed);
- OSVERSIONINFOW os={sizeof(os)};GetVersionExW(&os);
- glass=skin==SEVEN && composed && !contrastMode && os.dwMajorVersion==6 && os.dwMinorVersion==1;
- MARGINS frame={0,0,glass?scale(12):0,glass?scale(100):0};
- if(composed && FAILED(DwmExtendFrameIntoClientArea(w,&frame)))glass=false;
- InvalidateRect(w,NULL,TRUE);
-}
+#include "backdrop.h"
 static void layout(HWND w,int x,int y){
  int top=skin==XP?scale(27):skin==SEVEN?scale(12):0;
  int frame=skin==XP?scale(4):skin==SEVEN?scale(2):0;
@@ -74,8 +63,17 @@ static void applyTheme(HWND w,int value){
  /* Windows 11 honors caption color. Older versions keep their native caption. */
  COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:skin==MODERN?0xf5f5f5:themes[skin].panel);
  DwmSetWindowAttribute(w,35,&caption,sizeof(caption));
+ COLORREF captionInk=contrastMode?0xffffffff:color(skin==XP||skin==MAC?0xffffff:0x152334);
+ DwmSetWindowAttribute(w,36,&captionInk,sizeof(captionInk));
+ int corners=skin==MODERN||skin==XP?1:2;
+ DwmSetWindowAttribute(w,33,&corners,sizeof(corners));
+ HFONT nextFont=CreateFontW(-scale(skin==XP?13:14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,skin==XP?L"Tahoma":L"Segoe UI");
+ if(nextFont){HFONT old=uiFont;uiFont=nextFont;
+ for(HWND child=GetWindow(w,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,(WPARAM)uiFont,FALSE);
+ DeleteObject(old);}
+
  RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
- RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
+ RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_ERASE|RDW_ALLCHILDREN);
 }
 static wchar_t *wide(const char *s){
  int n=MultiByteToWideChar(CP_UTF8,0,s,-1,NULL,0);
@@ -126,8 +124,13 @@ static void track(void *menu,int id,const char *name,bool selected){
 static HMENU submenu(HMENU parent,const wchar_t *name){
  HMENU m=CreatePopupMenu();AppendMenuW(parent,MF_POPUP,(UINT_PTR)m,name);MENUINFO info={sizeof(info),MIM_STYLE,MNS_NOTIFYBYPOS};SetMenuInfo(m,&info);return m;
 }
+#include "caption.h"
 static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
+ case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
+ LRESULT result=DefWindowProcW(w,msg,wp,lp);
+ if(brandIcon)paintCaption(w);
+ return result;}
  case WM_CREATE:{
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
  HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
@@ -155,6 +158,26 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));SelectObject(dc,uiFont);r.left=scale(9);DrawTextW(dc,L"RMP",-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER);
  }}
  return 1;}
+ case WM_NOTIFY:{
+ NMHDR *notice=(NMHDR *)lp;
+ if(!contrastMode && skin!=MAC && notice->code==NM_CUSTOMDRAW && (notice->hwndFrom==position||notice->hwndFrom==level)){
+ NMCUSTOMDRAW *draw=(NMCUSTOMDRAW *)lp;
+ if(draw->dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
+ if(draw->dwDrawStage==CDDS_ITEMPREPAINT){
+ RECT r=draw->rc;Theme t=themes[skin];
+ if(draw->dwItemSpec==TBCD_CHANNEL){
+ int mid=(r.top+r.bottom)/2;r.top=mid-scale(2);r.bottom=mid+scale(2);
+ fillColor(draw->hdc,r,color(t.edge));int pos=SendMessageW(notice->hwndFrom,TBM_GETPOS,0,0);
+ int limit=SendMessageW(notice->hwndFrom,TBM_GETRANGEMAX,0,0);
+ if(limit>0){r.right=r.left+MulDiv(r.right-r.left,pos,limit);fillColor(draw->hdc,r,color(t.accent));}
+ return CDRF_SKIPDEFAULT;}
+ if(draw->dwItemSpec==TBCD_THUMB){
+ if(skin==XP){fillColor(draw->hdc,r,color(t.face));DrawEdge(draw->hdc,&r,EDGE_RAISED,BF_RECT);RECT grip=r;InflateRect(&grip,-2,-2);grip.bottom=grip.top+scale(3);fillColor(draw->hdc,grip,color(0x60a437));}
+ else if(skin==SEVEN){blend(draw->hdc,r,0xf7fcff,0x71a5d1);DrawEdge(draw->hdc,&r,EDGE_RAISED,BF_RECT);}
+ else{fillColor(draw->hdc,r,color(t.accent));}
+ return CDRF_SKIPDEFAULT;}
+ }}
+ break;}
  case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
  case WM_CTLCOLORSTATIC:if((HWND)lp!=video && (HWND)lp!=idleLogo && panelBrush && !contrastMode){
  SetBkColor((HDC)wp,color(themes[skin].panel));SetTextColor((HDC)wp,color(themes[skin].text));return (LRESULT)panelBrush;}break;

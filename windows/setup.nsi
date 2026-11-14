@@ -29,7 +29,7 @@ Section
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP · Rust Media Player"
- WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.1.0"
+ WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.2.0"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
 SectionEnd
 Section "Uninstall"

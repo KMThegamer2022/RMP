@@ -15,6 +15,7 @@ extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool)
 @interface PlayerApp : NSObject<NSApplicationDelegate,NSMenuDelegate,NSWindowDelegate>{
  Player *p;
  NSWindow *window;
+ NSVisualEffectView *aeroDeck;
  NSView *screen;
  NSTextField *name,*status,*clockLabel,*welcome;
  NSSlider *seek,*volume;
@@ -82,9 +83,11 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 -(void)applyTheme:(NSInteger)value {
  skin=value>=0 && value<THEME_COUNT?value:MAC;
  ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
+ BOOL translucent=skin==SEVEN && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency;
+ aeroDeck.hidden=!translucent;window.opaque=!translucent;
  window.appearance=[NSAppearance appearanceNamed:skin==MAC?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
  window.titlebarAppearsTransparent=YES;
- window.backgroundColor=rgb(skin==XP?0x3978db:skin==MODERN?0xf5f5f5:themes[skin].panel);
+ window.backgroundColor=translucent?NSColor.clearColor:rgb(skin==XP?0x3978db:skin==MODERN?0xf5f5f5:themes[skin].panel);
  [self styleView:surface];
  if(skin==XP || skin==MODERN){NSColor *ink=skin==XP?NSColor.whiteColor:rgb(0x181818);name.textColor=ink;status.textColor=ink;}
  screen.layer.borderWidth=skin==XP?4:skin==SEVEN?2:0;
@@ -137,6 +140,10 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [timeline.topAnchor constraintEqualToAnchor:screen.bottomAnchor constant:10].active=YES;
  [bottom.topAnchor constraintEqualToAnchor:timeline.bottomAnchor constant:6].active=YES;
  [bottom.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12].active=YES;
+ aeroDeck=[[NSVisualEffectView alloc]initWithFrame:NSZeroRect];aeroDeck.material=NSVisualEffectMaterialLight;
+ aeroDeck.blendingMode=NSVisualEffectBlendingModeBehindWindow;aeroDeck.state=NSVisualEffectStateActive;
+ [root addSubview:aeroDeck positioned:NSWindowBelow relativeTo:timeline];aeroDeck.translatesAutoresizingMaskIntoConstraints=NO;
+ [NSLayoutConstraint activateConstraints:@[[aeroDeck.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],[aeroDeck.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],[aeroDeck.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],[aeroDeck.topAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(MAC)}];
  [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
  p=ap_create((__bridge void *)screen);
