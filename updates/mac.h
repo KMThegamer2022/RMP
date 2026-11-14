@@ -10,6 +10,10 @@ static BOOL validVersion(NSString *v){
 static void updateFailure(NSString *reason){
  dispatch_async(dispatch_get_main_queue(),^{NSAlert *a=[NSAlert new];a.messageText=@"RMP could not update";a.informativeText=reason;[a runModal];});
 }
+static NSString *createUpdateStage(NSString *root, NSError **error){
+ NSString *path=[root stringByAppendingPathComponent:[@".rmp-update-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+ return [NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:NO attributes:@{NSFilePosixPermissions:@0700} error:error]?path:nil;
+}
 static void stageUpdate(NSDictionary *asset,NSString *version){
  NSURL *url=[NSURL URLWithString:asset[@"browser_download_url"]];
  [[[NSURLSession sharedSession] downloadTaskWithURL:url completionHandler:^(NSURL *file,NSURLResponse *response,NSError *error){
@@ -19,8 +23,17 @@ static void stageUpdate(NSDictionary *asset,NSString *version){
  NSMutableString *digest=[@"sha256:" mutableCopy];for(unsigned i=0;i<sizeof(hash);i++)[digest appendFormat:@"%02x",hash[i]];
  if(![digest isEqual:asset[@"digest"]]){updateFailure(@"The download did not match the release checksum.");return;}
  NSFileManager *fm=NSFileManager.defaultManager;NSString *dest=NSBundle.mainBundle.bundlePath;
- NSString *stage=[dest.stringByDeletingLastPathComponent stringByAppendingPathComponent:[@".rmp-update-" stringByAppendingString:NSUUID.UUID.UUIDString]];
- if(![fm createDirectoryAtPath:stage withIntermediateDirectories:NO attributes:@{NSFilePosixPermissions:@0700} error:nil]){updateFailure(@"Move RMP into a writable Applications folder, then reopen it.");return;}
+ NSString *root=dest.stringByDeletingLastPathComponent;
+ NSError *installError=nil;
+ NSString *stage=createUpdateStage(root,&installError);
+ if(!stage){
+  root=[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
+  dest=[root stringByAppendingPathComponent:@"RMP.app"];
+  if(![fm createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:&installError] ||
+     !(stage=createUpdateStage(root,&installError))){
+   updateFailure([NSString stringWithFormat:@"Could not prepare an update in %@. %@",root,installError.localizedDescription]);return;
+  }
+ }
  NSString *app=[stage stringByAppendingPathComponent:@"RMP.app"];
  if(runTool(@"/usr/bin/ditto",@[@"-x",@"-k",file.path,stage])||runTool(@"/usr/bin/codesign",@[@"--verify",@"--deep",@"--strict",app])||![[NSBundle bundleWithPath:app].bundleIdentifier isEqual:NSBundle.mainBundle.bundleIdentifier]||![[[NSBundle bundleWithPath:app] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] isEqual:version]){
  [fm removeItemAtPath:stage error:nil];updateFailure(@"The downloaded app failed verification.");return;}
@@ -56,7 +69,7 @@ static void checkMacUpdates(BOOL manual){
  best=v;asset=a;notes=[r[@"body"] isKindOfClass:NSString.class]?r[@"body"]:@"";break;}
  }
  if(!asset){finishCheck(@"RMP is up to date",[NSString stringWithFormat:@"You are running RMP %@.",current]);return;}
- dispatch_async(dispatch_get_main_queue(),^{NSAlert *a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"Update to RMP %@?",best];a.informativeText=@"RMP will download the update and reopen.";
+ dispatch_async(dispatch_get_main_queue(),^{NSAlert *a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"Update to RMP %@?",best];a.informativeText=@"RMP will download the update and reopen. If this copy is read-only, the update will be installed in your personal Applications folder.";
  NSScrollView *scroll=[[NSScrollView alloc]initWithFrame:NSMakeRect(0,0,400,160)];scroll.hasVerticalScroller=YES;NSTextView *text=[[NSTextView alloc]initWithFrame:scroll.bounds];text.editable=NO;text.string=notes;scroll.documentView=text;a.accessoryView=scroll;
  [a addButtonWithTitle:@"Update"];[a addButtonWithTitle:@"Not now"];NSModalResponse answer=[a runModal];checkingUpdates=NO;explicitCheck=NO;if(answer==NSAlertFirstButtonReturn)stageUpdate(asset,best);
  });
