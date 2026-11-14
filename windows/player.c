@@ -59,11 +59,11 @@ static void layout(HWND w,int x,int y){
  int cy=y-scale(classic?34:48),mid=x/2;
  MoveWindow(position,scale(10),deck+scale(3),x-scale(142),scale(24),TRUE);
  MoveWindow(clocktext,x-scale(129),deck+scale(2),scale(125),scale(24),TRUE);
- int ids[]={PLAY,PREV,STOP,NEXT,FULL,LIST,REPEAT,SHUFFLE,OPEN,THEME_BUTTON};
+ int ids[]={PLAY,PREV,STOP,NEXT,FULL,LIST,REPEAT,SHUFFLE,OPEN};
  int left=scale(8);
  for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
  HWND b=GetDlgItem(host,ids[i]);bool extra=ids[i]==LIST||ids[i]==REPEAT||ids[i]==SHUFFLE;
- bool show=classic?(ids[i]!=OPEN&&ids[i]!=THEME_BUTTON):!extra;
+ bool show=classic?(ids[i]!=OPEN):!extra;
  ShowWindow(b,show?SW_SHOWNA:SW_HIDE);if(!show)continue;
  int width=scale(classic?(i==0?40:32):(i==2?48:i==4?64:76));
  MoveWindow(b,left,cy,width,scale(classic?29:36),TRUE);left+=width+scale(classic?2:4);
@@ -77,7 +77,7 @@ static void applyTheme(HWND w,int value){
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
  HWND host=fullscreen?transport:w;
- int ids[]={PLAY,NEXT,PREV,STOP,FULL,OPEN,THEME_BUTTON,LIST,REPEAT,SHUFFLE};for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
+ int ids[]={PLAY,NEXT,PREV,STOP,FULL,OPEN,LIST,REPEAT,SHUFFLE};for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
  HWND button=GetDlgItem(host,ids[i]);SendMessageW(button,BM_SETSTYLE,skin==SEVEN?BS_PUSHBUTTON:BS_OWNERDRAW,TRUE);}
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)(skin==VLC_THEME?coneIcon:brandIcon),0);
  /* Windows 11 honors caption color. Older versions keep their native caption. */
@@ -172,7 +172,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
- control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);control(w,L"BUTTON",L"Theme ▾",THEME_BUTTON,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
+ control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
  coneIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(2),IMAGE_ICON,scale(120),scale(120),0);
  control(w,L"BUTTON",L"☷",LIST,BS_OWNERDRAW);control(w,L"BUTTON",L"↻",REPEAT,BS_OWNERDRAW);control(w,L"BUTTON",L"⤨",SHUFFLE,BS_OWNERDRAW);
  control(w,L"BUTTON",L"■",STOP,BS_OWNERDRAW);control(w,L"BUTTON",L"⛶",FULL,BS_OWNERDRAW);
@@ -246,7 +246,6 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else ap_select(player,m==subs,(int)item.dwItemData);return 0;}
  case WM_COMMAND:
  if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;applyTheme(w,value);storeTheme(value);return 0;}
- if(LOWORD(wp)==THEME_BUTTON){RECT r;GetWindowRect(GetDlgItem(fullscreen?transport:w,THEME_BUTTON),&r);TrackPopupMenu(themeMenu,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);return 0;}
  switch(LOWORD(wp)){case 490:if(!launchCheck(true))MessageBoxW(w,L"The update helper could not start. Reinstall RMP to restore it.",L"RMP update",MB_ICONERROR);break;case LIST:{RECT r;GetWindowRect(GetDlgItem(fullscreen?transport:w,LIST),&r);TrackPopupMenu(queue,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);break;}
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
  case SHUFFLE:shuffle=!shuffle;SetWindowTextW((HWND)lp,shuffle?L"⤨✓":L"⤨");break;

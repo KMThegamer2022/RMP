@@ -3,7 +3,7 @@ static int skin=VLC_THEME;
 static HMENU themeMenu;
 static HBRUSH panelBrush;
 static bool contrastMode;
-enum { THEME_BUTTON=300, THEME_FIRST=310 };
+enum { THEME_FIRST=310 };
 static const wchar_t *names[]={L"Windows 10/11",L"Windows 7",L"Windows XP",L"Mac",L"RMP Default",L"VLC"};
 static COLORREF color(unsigned c){return RGB(c>>16,(c>>8)&255,c&255);}
 static int savedTheme(void){

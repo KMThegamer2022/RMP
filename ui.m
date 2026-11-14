@@ -119,9 +119,6 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 -(void)pickTheme:(NSMenuItem *)entry {
  [self applyTheme:entry.tag];[NSUserDefaults.standardUserDefaults setInteger:skin forKey:@"PlayerTheme"];
 }
--(void)showThemes:(NSButton *)sender{
- [themeMenu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,NSHeight(sender.bounds)) inView:sender];
-}
 -(NSStackView *)row:(NSArray *)views{
  NSStackView *r=[NSStackView stackViewWithViews:views];r.spacing=10;r.orientation=NSUserInterfaceLayoutOrientationHorizontal;return r;
 }
@@ -141,14 +138,14 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  name=label(@"RMP",18,YES);status=label(@"Ready",12,NO);
  [name setContentCompressionResistancePriority:200 forOrientation:NSLayoutConstraintOrientationHorizontal];
  NSView *space=[NSView new];
- top=[self row:@[name,space,status,[self button:@"Theme ▾" action:@selector(showThemes:)],[self button:@"Open Files…" action:@selector(open:)]]];
+ top=[self row:@[name,space,status,[self button:@"Open Files…" action:@selector(open:)]]];
  play=[self button:@"Play" action:@selector(toggle:)];
  volume=[VolumeSlider sliderWithValue:80 minValue:0 maxValue:100 target:self action:@selector(changeVolume:)];volume.toolTip=@"Volume";
  [volume.widthAnchor constraintEqualToConstant:85].active=YES;
  seek=[NSSlider sliderWithValue:0 minValue:0 maxValue:1 target:self action:@selector(scrub:)];seek.continuous=NO;seek.toolTip=@"Playback position";
  clockLabel=label(@"0:00 / 0:00",12,NO);clockLabel.font=[NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightRegular];
  timeline=[self row:@[seek,clockLabel]];
- bottom=[self row:@[play,[self button:@"Previous" action:@selector(prev:)],[self button:@"■" action:@selector(stopPlayback:)],[self button:@"Next" action:@selector(next:)],[self button:@"⛶" action:@selector(full:)],[self button:@"Queue" action:@selector(queuePopup:)],[self button:@"↻" action:@selector(repeatToggle:)],[self button:@"⤨" action:@selector(shuffleToggle:)],[self button:@"Theme ▾" action:@selector(showThemes:)],[NSView new],label(@"Volume",12,NO),volume]];
+ bottom=[self row:@[play,[self button:@"Previous" action:@selector(prev:)],[self button:@"■" action:@selector(stopPlayback:)],[self button:@"Next" action:@selector(next:)],[self button:@"⛶" action:@selector(full:)],[self button:@"Queue" action:@selector(queuePopup:)],[self button:@"↻" action:@selector(repeatToggle:)],[self button:@"⤨" action:@selector(shuffleToggle:)],[NSView new],label(@"Volume",12,NO),volume]];
  for(NSView *v in @[top,screen,timeline,bottom]){
  [root addSubview:v];v.translatesAutoresizingMaskIntoConstraints=NO;
  CGFloat inset=v==screen?0:16;

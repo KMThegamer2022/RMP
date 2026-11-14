@@ -27,7 +27,7 @@ The Windows interface uses Segoe UI and themed Win32 controls. On a Windows 7 Ae
 
 ## Themes in RMP 2.0
 
-Open **Theme ▾** in the player or **Theme** in the menu bar. Windows 10/11 uses a Films & TV-style black playback strip with white icon controls, Windows 7 on Windows uses native controls over the bottom frame extension, Windows XP uses a cobalt Luna frame and beveled cream controls, and Mac uses a dark charcoal panel and rounded controls. RMP Default uses a charcoal surface, rounded controls, and orange playback accents. New installations start with RMP Default. The same five choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
+Open **Theme** in the macOS menu bar or the Windows player’s menu bar. Windows 10/11 uses a Films & TV-style black playback strip with white icon controls, Windows 7 on Windows uses native controls over the bottom frame extension, Windows XP uses a cobalt Luna frame and beveled cream controls, and Mac uses a dark charcoal panel and rounded controls. RMP Default uses a charcoal surface, rounded controls, and orange playback accents. New installations start with RMP Default. The same five choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
 
 The Windows 7 theme on Windows uses DwmExtendFrameIntoClientArea with only a bottom margin. Windows and the installed compositor determine the appearance. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
 
@@ -35,7 +35,7 @@ The three Windows themes draw on screenshots of [XP Explorer](https://gekk.info/
 
 ## Installing and updating
 
-Both graphical installers let you select an initial theme. Windows installs for the current account. On macOS, open the setup disk image and run RMP Setup to install in ~/Applications. You can change the theme later from the player's Theme button or menu.
+Both graphical installers let you select an initial theme. Windows installs for the current account. On macOS, open the setup disk image and run RMP Setup to install in ~/Applications. You can change the theme later from the Theme menu.
 
 Once per launch, RMP checks published GitHub releases in the background. A newer stable version with a matching platform download opens a release-notes prompt. Choose Update (Yes on Windows) to download, verify the GitHub asset's SHA-256 digest, install and reopen. Choose Not now (No on Windows) to reconsider next launch. Updates require a writable installation folder and network access to GitHub. Install this updater-equipped release manually if upgrading from 2.2 or earlier.
 

@@ -11,7 +11,7 @@ static LRESULT CALLBACK transportProc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  return DefWindowProcW(w,msg,wp,lp);
 }
 static void moveTransport(HWND from,HWND to){
- int ids[]={OPEN,THEME_BUTTON,PREV,PLAY,NEXT,FULL,STOP,LIST,REPEAT,SHUFFLE};
+ int ids[]={OPEN,PREV,PLAY,NEXT,FULL,STOP,LIST,REPEAT,SHUFFLE};
  for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){HWND b=GetDlgItem(from,ids[i]);if(b)SetParent(b,to);}
  HWND rest[]={position,level,volumeLabel,clocktext};for(unsigned i=0;i<4;i++)SetParent(rest[i],to);
 }

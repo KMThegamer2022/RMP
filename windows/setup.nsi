@@ -27,7 +27,7 @@ Function ThemePage
  !insertmacro MUI_HEADER_TEXT "Choose a player theme" "Choose how RMP looks when it opens."
  nsDialogs::Create 1018
  Pop $0
- ${NSD_CreateLabel} 0 4u 100% 28u "Select one theme. You can change it later using the Theme button in the player or the Theme menu."
+ ${NSD_CreateLabel} 0 4u 100% 28u "Select one theme. You can change it later from the Theme menu in the window menu bar."
  Pop $0
  ${NSD_CreateRadioButton} 8u 25u 90% 13u "VLC"
  Pop $Theme5
@@ -116,7 +116,7 @@ Section
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP · Rust Media Player"
- WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.6.1"
+ WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.6.3"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
