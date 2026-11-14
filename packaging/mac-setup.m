@@ -3,12 +3,12 @@ int main(void){@autoreleasepool{
  [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];
  NSAlert *a=[NSAlert new];a.messageText=@"Install Rust Media Player";
  a.informativeText=@"Install RMP in your Applications folder. Choose one theme to start with. You can change it anytime using the Theme button or the Theme menu.";
- NSArray *names=@[@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"];
- NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,104)];
+ NSArray *names=@[@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"];
+ NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,134)];
  NSDictionary *prefs=[NSUserDefaults.standardUserDefaults persistentDomainForName:@"io.github.kmthegamer2022.rmp"];
- NSNumber *stored=prefs[@"PlayerTheme"];NSInteger selected=stored?stored.integerValue:3;
+ NSNumber *stored=prefs[@"PlayerTheme"];NSInteger selected=stored && stored.integerValue>=0 && stored.integerValue<5?stored.integerValue:4;
  NSMutableArray *buttons=[NSMutableArray new];
- for(NSInteger i=0;i<4;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,78-i*25,280,24);b.state=i==selected;[options addSubview:b];[buttons addObject:b];}
+ for(NSInteger i=0;i<5;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,105-i*25,280,24);b.tag=i==0?4:i-1;b.state=b.tag==selected;[options addSubview:b];[buttons addObject:b];}
  a.accessoryView=options;[a addButtonWithTitle:@"Install"];[a addButtonWithTitle:@"Cancel"];if([a runModal]!=NSAlertFirstButtonReturn)return 0;
  NSFileManager *fm=NSFileManager.defaultManager;NSString *root=[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
  NSString *dest=[root stringByAppendingPathComponent:@"RMP.app"];
@@ -18,6 +18,6 @@ int main(void){@autoreleasepool{
  if([fm fileExistsAtPath:dest]) [fm replaceItemAtURL:[NSURL fileURLWithPath:dest] withItemAtURL:[NSURL fileURLWithPath:stage] backupItemName:nil options:0 resultingItemURL:nil error:&err];
  else [fm moveItemAtPath:stage toPath:dest error:&err];}
  if(err){[fm removeItemAtPath:stage error:nil];[[NSAlert alertWithError:err]runModal];return 1;}
- for(NSButton *b in buttons)if(b.state==NSControlStateValueOn){CFPreferencesSetAppValue(CFSTR("PlayerTheme"),(__bridge CFNumberRef)@([buttons indexOfObject:b]),CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));break;}
+ for(NSButton *b in buttons)if(b.state==NSControlStateValueOn){CFPreferencesSetAppValue(CFSTR("PlayerTheme"),(__bridge CFNumberRef)@(b.tag),CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));break;}
  [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:dest]];return 0;
 }}

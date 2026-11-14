@@ -27,7 +27,7 @@ The Windows interface uses Segoe UI and themed Win32 controls. On a Windows 7 Ae
 
 ## Themes in RMP 2.0
 
-Open **Theme ▾** in the player or **Theme** in the menu bar. Windows 10/11 uses a Films & TV-style black playback strip with white icon controls, Windows 7 uses a glass finish and a glossy blue play orb, Windows XP uses a cobalt Luna frame and beveled cream controls, and Mac uses a dark charcoal panel and rounded controls. The same four choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
+Open **Theme ▾** in the player or **Theme** in the menu bar. Windows 10/11 uses a Films & TV-style black playback strip with white icon controls, Windows 7 uses a glass finish and a glossy blue play orb, Windows XP uses a cobalt Luna frame and beveled cream controls, and Mac uses a dark charcoal panel and rounded controls. RMP Default uses a charcoal surface, rounded controls, and orange playback accents. New installations start with RMP Default. The same five choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
 
 The Windows 7 theme extends genuine DWM glass into the top strip and bottom playback bar on a Windows 7 desktop with composition enabled. On newer Windows desktops the same theme requests Desktop Acrylic or compositor blur. A blue gradient is available when the effect cannot be enabled. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
 

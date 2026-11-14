@@ -8,6 +8,7 @@ Var Theme0
 Var Theme1
 Var Theme2
 Var Theme3
+Var Theme4
 Name "RMP · Rust Media Player"
 OutFile "../RMP-Setup-x64.exe"
 InstallDir "$LOCALAPPDATA\Programs\RMP"
@@ -26,22 +27,27 @@ Function ThemePage
  Pop $0
  ${NSD_CreateLabel} 0 4u 100% 28u "Select one theme. You can change it later using the Theme button in the player or the Theme menu."
  Pop $0
- ${NSD_CreateRadioButton} 8u 36u 90% 14u "Windows 10/11"
+ ${NSD_CreateRadioButton} 8u 32u 90% 14u "RMP Default"
+ Pop $Theme4
+ ${If} $ThemeChoice == 4
+  ${NSD_Check} $Theme4
+ ${EndIf}
+ ${NSD_CreateRadioButton} 8u 52u 90% 14u "Windows 10/11"
  Pop $Theme0
  ${If} $ThemeChoice == 0
   ${NSD_Check} $Theme0
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 56u 90% 14u "Windows 7"
+ ${NSD_CreateRadioButton} 8u 72u 90% 14u "Windows 7"
  Pop $Theme1
  ${If} $ThemeChoice == 1
   ${NSD_Check} $Theme1
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 76u 90% 14u "Windows XP"
+ ${NSD_CreateRadioButton} 8u 92u 90% 14u "Windows XP"
  Pop $Theme2
  ${If} $ThemeChoice == 2
   ${NSD_Check} $Theme2
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 96u 90% 14u "Mac"
+ ${NSD_CreateRadioButton} 8u 112u 90% 14u "Mac"
  Pop $Theme3
  ${If} $ThemeChoice == 3
   ${NSD_Check} $Theme3
@@ -49,6 +55,10 @@ Function ThemePage
  nsDialogs::Show
 FunctionEnd
 Function ThemeLeave
+ ${NSD_GetState} $Theme4 $0
+ ${If} $0 == ${BST_CHECKED}
+  StrCpy $ThemeChoice 4
+ ${EndIf}
  ${NSD_GetState} $Theme0 $0
  ${If} $0 == ${BST_CHECKED}
   StrCpy $ThemeChoice 0
@@ -69,7 +79,8 @@ FunctionEnd
 Function .onInit
  ReadRegDWORD $ThemeChoice HKCU "Software\RMP" "Theme"
  ${If} ${Errors}
-  StrCpy $ThemeChoice 0
+ ${OrIf} $ThemeChoice > 4
+  StrCpy $ThemeChoice 4
  ${EndIf}
  ${IfNot} ${RunningX64}
   MessageBox MB_OK "RMP requires 64-bit Windows."
@@ -87,7 +98,7 @@ Section
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP · Rust Media Player"
- WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.3.2"
+ WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "2.4.0"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
 SectionEnd
 Section "Uninstall"

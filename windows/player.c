@@ -83,7 +83,7 @@ static void applyTheme(HWND w,int value){
  /* Windows 11 honors caption color. Older versions keep their native caption. */
  COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:skin==MODERN?0xf5f5f5:themes[skin].panel);
  DwmSetWindowAttribute(w,35,&caption,sizeof(caption));
- COLORREF captionInk=contrastMode?0xffffffff:color(skin==XP||skin==MAC?0xffffff:0x152334);
+ COLORREF captionInk=contrastMode?0xffffffff:color(skin==XP||skin==MAC||skin==RMP_DEFAULT?0xffffff:0x152334);
  DwmSetWindowAttribute(w,36,&captionInk,sizeof(captionInk));
  int corners=skin==MODERN||skin==XP?1:2;
  DwmSetWindowAttribute(w,33,&corners,sizeof(corners));
@@ -165,7 +165,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
  AppendMenuW(file,MF_SEPARATOR,0,NULL);AppendMenuW(file,MF_STRING,490,L"Check for Updates…");
  HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
- queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");for(int i=0;i<THEME_COUNT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);SetMenu(w,bar);
+ queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+RMP_DEFAULT,names[RMP_DEFAULT]);for(int i=0;i<RMP_DEFAULT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);SetMenu(w,bar);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|WS_CLIPCHILDREN);SetWindowSubclass(video,videoProc,1,0);player=ap_create(video);if(!player)return -1;
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);

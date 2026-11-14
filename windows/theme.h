@@ -1,14 +1,14 @@
 #include "../themes.h"
-static int skin=MODERN;
+static int skin=RMP_DEFAULT;
 static HMENU themeMenu;
 static HBRUSH panelBrush;
 static bool contrastMode;
 enum { THEME_BUTTON=300, THEME_FIRST=310 };
-static const wchar_t *names[]={L"Windows 10/11",L"Windows 7",L"Windows XP",L"Mac"};
+static const wchar_t *names[]={L"Windows 10/11",L"Windows 7",L"Windows XP",L"Mac",L"RMP Default"};
 static COLORREF color(unsigned c){return RGB(c>>16,(c>>8)&255,c&255);}
 static int savedTheme(void){
  DWORD value=0,size=sizeof(value);
- if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"Theme",RRF_RT_REG_DWORD,NULL,&value,&size)!=ERROR_SUCCESS || value>=THEME_COUNT)return MODERN;
+ if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"Theme",RRF_RT_REG_DWORD,NULL,&value,&size)!=ERROR_SUCCESS || value>=THEME_COUNT)return RMP_DEFAULT;
  return (int)value;
 }
 static void storeTheme(int value){
@@ -23,7 +23,7 @@ static void blend(HDC dc,RECT r,unsigned a,unsigned b){
 }
 #include "seven.h"
 static void paintButton(DRAWITEMSTRUCT *d){
- Theme t=themes[skin];RECT r=d->rcItem;HDC dc=d->hDC;
+ Theme t=themes[skin];if(skin==RMP_DEFAULT && d->CtlID==PLAY){t.face=t.accent;t.edge=0xdd6238;t.text=0x16191f;}RECT r=d->rcItem;HDC dc=d->hDC;
  if(contrastMode){DrawFrameControl(dc,&r,DFC_BUTTON,DFCS_BUTTONPUSH|((d->itemState&ODS_SELECTED)?DFCS_PUSHED:0));}
  else{
  if(skin==SEVEN)sevenSurface(dc,d->hwndItem);else fillColor(dc,r,color(t.panel));InflateRect(&r,-1,-1);

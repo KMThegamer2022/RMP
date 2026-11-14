@@ -69,8 +69,8 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [self item:media title:@"Toggle Full Screen" action:@selector(full:) key:@"f"].keyEquivalentModifierMask=NSEventModifierFlagControl|NSEventModifierFlagCommand;
  queue=[self menu:@"Queue" parent:bar];audio=[self menu:@"Audio Track" parent:bar];subs=[self menu:@"Subtitles" parent:bar];
  themeMenu=[self menu:@"Theme" parent:bar];
- for(NSString *title in @[@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"]){
- NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];entry.tag=themeMenu.numberOfItems-1;
+ for(NSString *title in @[@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"]){
+ NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];entry.tag=themeMenu.numberOfItems==1?RMP_DEFAULT:themeMenu.numberOfItems-2;
  }
  queue.delegate=self;audio.delegate=self;subs.delegate=self;
 }
@@ -85,11 +85,11 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  if(v!=screen)for(NSView *child in v.subviews)[self styleView:child];
 }
 -(void)applyTheme:(NSInteger)value {
- skin=value>=0 && value<THEME_COUNT?value:MAC;
+ skin=value>=0 && value<THEME_COUNT?value:RMP_DEFAULT;
  ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
  BOOL translucent=skin==SEVEN && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency;
  aeroDeck.hidden=!translucent;window.opaque=!translucent;
- window.appearance=[NSAppearance appearanceNamed:skin==MAC?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
+ window.appearance=[NSAppearance appearanceNamed:(skin==MAC||skin==RMP_DEFAULT)?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
  window.titlebarAppearsTransparent=YES;
  window.backgroundColor=translucent?NSColor.clearColor:rgb(skin==XP?0x3978db:skin==MODERN?0xf5f5f5:themes[skin].panel);
  [self styleView:surface];
@@ -148,7 +148,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  aeroDeck.blendingMode=NSVisualEffectBlendingModeBehindWindow;aeroDeck.state=NSVisualEffectStateActive;
  [root addSubview:aeroDeck positioned:NSWindowBelow relativeTo:timeline];aeroDeck.translatesAutoresizingMaskIntoConstraints=NO;
  [NSLayoutConstraint activateConstraints:@[[aeroDeck.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],[aeroDeck.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],[aeroDeck.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],[aeroDeck.topAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
- [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(MAC)}];
+ [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(RMP_DEFAULT)}];
  [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
  p=ap_create((__bridge void *)screen);
  if(!p){NSAlert *a=[NSAlert new];a.messageText=@"RMP could not load its playback engine.";[a runModal];[NSApp terminate:nil];return;}

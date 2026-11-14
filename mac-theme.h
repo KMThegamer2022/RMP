@@ -32,6 +32,7 @@ static NSColor *rgb(unsigned v) {
  BOOL transport=play||prev||next,orb=self.skin==SEVEN && play;
  if(orb){CGFloat d=MIN(r.size.width,r.size.height);r=NSMakeRect(NSMidX(r)-d/2,NSMidY(r)-d/2,d,d);}
  NSBezierPath *path=[NSBezierPath bezierPathWithRoundedRect:r xRadius:orb?NSHeight(r)/2:t.radius yRadius:orb?NSHeight(r)/2:t.radius];
+ if(self.skin==RMP_DEFAULT && play){t.face=t.accent;t.edge=0xdd6238;t.text=0x16191f;}
  BOOL pressed=self.cell.isHighlighted;
  [NSGraphicsContext saveGraphicsState];[path addClip];
  if(self.skin==XP || self.skin==SEVEN){

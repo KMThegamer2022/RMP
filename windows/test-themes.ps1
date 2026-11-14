@@ -28,7 +28,8 @@ function Check-Menu($w,$id) {
 $p=Start-Process $Player -ArgumentList $Fixture -PassThru
 try {
  $w=Get-Window $p
- foreach ($id in 310..313) {
+ Check-Menu $w 314
+ foreach ($id in 310..314) {
   [void][ThemeTest]::SendMessage($w,273,[IntPtr]$id,[IntPtr]::Zero)
   if($id -ne 311){Check-Menu $w $id}
   if ($id -eq 311) {
@@ -45,4 +46,4 @@ try {
  }
 } finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
 $p=Start-Process $Player -PassThru
-try {Check-Menu (Get-Window $p) 313} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
+try {Check-Menu (Get-Window $p) 314} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
