@@ -24,6 +24,11 @@ jobs:
         run: |
           export PATH="/c/mingw64/bin:/c/msys64/mingw64/bin:$PATH"
           CC=gcc WINDRES=windres bash windows/build.sh vlc-3.0.24 build/RMP
+      - name: Index bundled codecs
+        shell: pwsh
+        run: |
+          ./vlc-3.0.24/vlc-cache-gen.exe (Resolve-Path build/RMP/plugins)
+          if (!(Test-Path build/RMP/plugins/plugins.dat)) { throw 'Missing codec index' }
       - name: Exercise packaged playback
         shell: pwsh
         run: |
@@ -32,6 +37,26 @@ jobs:
           if (!$p.WaitForExit(40000)) { $p.Kill(); throw 'Playback test timed out' }
           if ($p.ExitCode -ne 0) { throw "Playback test failed ($($p.ExitCode))" }
           7z a -tzip RMP-Windows-x64.zip ./build/RMP
+      - name: Compare launch timings with Windows v1
+        shell: pwsh
+        run: |
+          curl.exe -fLsS --retry 2 https://github.com/KMThegamer2022/RMP/releases/download/v1.0.0-windows/RMP-Windows-x64.zip -o baseline.zip
+          7z x -obaseline baseline.zip
+          foreach ($app in @('baseline/RMP/RMP.exe','build/RMP/RMP.exe')) {
+            foreach ($trial in 1..5) {
+              $timer = [Diagnostics.Stopwatch]::StartNew()
+              $p = Start-Process $app -PassThru
+              while (!$p.HasExited -and !$p.MainWindowHandle -and $timer.ElapsedMilliseconds -lt 20000) { Start-Sleep -Milliseconds 10; $p.Refresh() }
+              if (!$p.MainWindowHandle) { throw 'No player window' }
+              Write-Host "WINDOW_MS $app $($timer.ElapsedMilliseconds)"
+              $null=$p.CloseMainWindow()
+              if (!$p.WaitForExit(5000)) { $p.Kill() }
+              $timer.Restart()
+              $p = Start-Process $app -ArgumentList '--smoke-test',(Resolve-Path fixture.wav) -PassThru
+              if (!$p.WaitForExit(30000) -or $p.ExitCode -ne 0) { throw 'Playback benchmark failed' }
+              Write-Host "PLAYBACK_TEST_MS $app $($timer.ElapsedMilliseconds)"
+            }
+          }
       - name: Build installer and test installed playback
         shell: pwsh
         run: |
@@ -69,4 +94,4 @@ jobs:
       - name: Publish Windows release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" RMP-Windows-x64.zip RMP-Setup-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "RMP 1.1.0 for Windows" --notes "Run RMP-Setup-x64.exe or extract the portable ZIP. Targets Windows 7 SP1 x64 and newer. Aero Glass follows the desktop theme. Build, playback and installer tested on Windows Server 2022. Windows 7 desktop verification pending."
+        run: gh release create "$GITHUB_REF_NAME" RMP-Windows-x64.zip RMP-Setup-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "RMP 1.1.1 for Windows" --notes "Run RMP-Setup-x64.exe or extract the portable ZIP. Targets Windows 7 SP1 x64 and newer. Aero Glass follows the desktop theme. Build, playback and installer tested on Windows Server 2022. Windows 7 desktop verification pending."

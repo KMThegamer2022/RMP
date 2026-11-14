@@ -19,7 +19,7 @@ extern "C" {
     fn libvlc_media_player_set_media(p: Handle, m: Handle);
     #[cfg(windows)]
     fn libvlc_media_player_set_hwnd(p: Handle, v: Handle);
-    #[cfg(target_os="macos")]
+    #[cfg(target_os = "macos")]
     fn libvlc_media_player_set_nsobject(p: Handle, v: Handle);
     fn libvlc_media_player_play(p: Handle) -> i32;
     fn libvlc_media_player_stop(p: Handle);
@@ -39,6 +39,7 @@ extern "C" {
     fn libvlc_video_get_spu(p: Handle) -> i32;
 }
 pub struct Player {
+    view: Handle,
     engine: Handle,
     player: Handle,
     queue: Vec<(CString, bool)>,
@@ -47,34 +48,52 @@ pub struct Player {
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
-    let args = [
-        c"--no-video-title-show".as_ptr(),
-        c"--ignore-config".as_ptr(),
-    ];
-    let engine = libvlc_new(args.len() as i32, args.as_ptr());
-    if engine.is_null() {
-        return ptr::null_mut();
-    }
-    let player = libvlc_media_player_new(engine);
-    if player.is_null() {
-        libvlc_release(engine);
-        return ptr::null_mut();
-    }
-    #[cfg(windows)]
-    libvlc_media_player_set_hwnd(player, view);
-    #[cfg(target_os="macos")]
-    libvlc_media_player_set_nsobject(player, view);
     Box::into_raw(Box::new(Player {
-        engine,
-        player,
+        view,
+        engine: ptr::null_mut(),
+        player: ptr::null_mut(),
         queue: Vec::new(),
         current: None,
         volume: 80,
     }))
 }
+unsafe fn ensure_engine(p: &mut Player) -> bool {
+    if !p.player.is_null() {
+        return true;
+    }
+    let mut args = vec![
+        c"--no-video-title-show".as_ptr(),
+        c"--ignore-config".as_ptr(),
+    ];
+    let plugins = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("plugins/plugins.dat")));
+    if plugins.is_some_and(|cache| cache.is_file()) {
+        args.push(c"--no-plugins-scan".as_ptr());
+    }
+    let engine = libvlc_new(args.len() as i32, args.as_ptr());
+    if engine.is_null() {
+        return false;
+    }
+    let player = libvlc_media_player_new(engine);
+    if player.is_null() {
+        libvlc_release(engine);
+        return false;
+    }
+    #[cfg(windows)]
+    libvlc_media_player_set_hwnd(player, p.view);
+    #[cfg(target_os = "macos")]
+    libvlc_media_player_set_nsobject(player, p.view);
+    p.engine = engine;
+    p.player = player;
+    true
+}
 #[no_mangle]
 pub unsafe extern "C" fn ap_destroy(raw: *mut Player) {
     let p = Box::from_raw(raw);
+    if p.player.is_null() {
+        return;
+    }
     libvlc_media_player_stop(p.player);
     libvlc_media_player_release(p.player);
     libvlc_release(p.engine);
@@ -97,6 +116,9 @@ pub extern "C" fn ap_item(p: &Player, i: usize) -> *const c_char {
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_play(p: &mut Player, i: usize) -> bool {
+    if i >= p.queue.len() || !ensure_engine(p) {
+        return false;
+    }
     let Some((s, network)) = p.queue.get(i) else {
         return false;
     };
@@ -118,6 +140,9 @@ pub unsafe extern "C" fn ap_play(p: &mut Player, i: usize) -> bool {
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_state(p: &Player) -> i32 {
+    if p.player.is_null() {
+        return 0;
+    }
     libvlc_media_player_get_state(p.player)
 }
 #[no_mangle]
@@ -132,14 +157,23 @@ pub unsafe extern "C" fn ap_toggle(p: &mut Player) {
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_time(p: &Player) -> i64 {
+    if p.player.is_null() {
+        return 0;
+    }
     libvlc_media_player_get_time(p.player)
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_length(p: &Player) -> i64 {
+    if p.player.is_null() {
+        return 0;
+    }
     libvlc_media_player_get_length(p.player)
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_seekable(p: &Player) -> bool {
+    if p.player.is_null() {
+        return false;
+    }
     libvlc_media_player_is_seekable(p.player) != 0
 }
 #[no_mangle]
@@ -151,6 +185,9 @@ pub unsafe extern "C" fn ap_seek(p: &Player, t: i64) {
 #[no_mangle]
 pub unsafe extern "C" fn ap_volume(p: &mut Player, v: i32) {
     p.volume = v.clamp(0, 100);
+    if p.player.is_null() {
+        return;
+    }
     libvlc_audio_set_volume(p.player, p.volume);
 }
 #[no_mangle]
@@ -160,6 +197,9 @@ pub unsafe extern "C" fn ap_tracks(
     ctx: Handle,
     add: extern "C" fn(Handle, i32, *const c_char, bool),
 ) {
+    if p.player.is_null() {
+        return;
+    }
     let head = if sub {
         libvlc_video_get_spu_description(p.player)
     } else {
@@ -184,6 +224,9 @@ pub unsafe extern "C" fn ap_tracks(
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_select(p: &Player, sub: bool, id: i32) -> bool {
+    if p.player.is_null() {
+        return false;
+    }
     (if sub {
         libvlc_video_set_spu(p.player, id)
     } else {
