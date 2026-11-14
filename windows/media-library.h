@@ -223,8 +223,8 @@ static void layoutClassicTransport(HWND host,int width,int deck){
   int id=order[i],bw=id==PLAY?scale(44):scale(xp?30:36),bh=id==PLAY?scale(42):scale(28);
   setBrowserPart(GetDlgItem(host,id),true,x,center-bh/2,bw,bh);x+=bw+scale(3);
  }
- setBrowserPart(volumeLabel,true,x+scale(4),center-scale(12),scale(47),scale(24));
- setBrowserPart(level,true,x+scale(52),center-scale(12),scale(77),scale(24));
+ setBrowserPart(volumeLabel,true,x+scale(4),center-scale(12),scale(61),scale(24));
+ setBrowserPart(level,true,x+scale(67),center-scale(12),scale(77),scale(24));
  setBrowserPart(GetDlgItem(host,FULL),true,width-scale(47),center-scale(14),scale(36),scale(28));
  MoveWindow(position,scale(9),deck+scale(2),width-scale(140),scale(24),TRUE);
  MoveWindow(clocktext,width-scale(126),deck+scale(2),scale(122),scale(24),TRUE);
