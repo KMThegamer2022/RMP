@@ -1,0 +1,94 @@
+!macro Types Action
+ !insertmacro ${Action} .3g2
+ !insertmacro ${Action} .3gp
+ !insertmacro ${Action} .aac
+ !insertmacro ${Action} .ac3
+ !insertmacro ${Action} .aif
+ !insertmacro ${Action} .aifc
+ !insertmacro ${Action} .aiff
+ !insertmacro ${Action} .alac
+ !insertmacro ${Action} .amr
+ !insertmacro ${Action} .aob
+ !insertmacro ${Action} .ape
+ !insertmacro ${Action} .asf
+ !insertmacro ${Action} .au
+ !insertmacro ${Action} .avi
+ !insertmacro ${Action} .axa
+ !insertmacro ${Action} .axv
+ !insertmacro ${Action} .bik
+ !insertmacro ${Action} .caf
+ !insertmacro ${Action} .crf
+ !insertmacro ${Action} .divx
+ !insertmacro ${Action} .dts
+ !insertmacro ${Action} .dvdmedia
+ !insertmacro ${Action} .eac3
+ !insertmacro ${Action} .evo
+ !insertmacro ${Action} .f4v
+ !insertmacro ${Action} .flac
+ !insertmacro ${Action} .flv
+ !insertmacro ${Action} .gxf
+ !insertmacro ${Action} .it
+ !insertmacro ${Action} .m1v
+ !insertmacro ${Action} .m2p
+ !insertmacro ${Action} .m2ts
+ !insertmacro ${Action} .m2v
+ !insertmacro ${Action} .m4a
+ !insertmacro ${Action} .m4b
+ !insertmacro ${Action} .m4p
+ !insertmacro ${Action} .m4v
+ !insertmacro ${Action} .mid
+ !insertmacro ${Action} .midi
+ !insertmacro ${Action} .mk3d
+ !insertmacro ${Action} .mka
+ !insertmacro ${Action} .mks
+ !insertmacro ${Action} .mkv
+ !insertmacro ${Action} .mlp
+ !insertmacro ${Action} .mod
+ !insertmacro ${Action} .mov
+ !insertmacro ${Action} .mp3
+ !insertmacro ${Action} .mp4
+ !insertmacro ${Action} .mpa
+ !insertmacro ${Action} .mpc
+ !insertmacro ${Action} .mpeg
+ !insertmacro ${Action} .mpeg2
+ !insertmacro ${Action} .mpeg4
+ !insertmacro ${Action} .mpg
+ !insertmacro ${Action} .mts
+ !insertmacro ${Action} .mxf
+ !insertmacro ${Action} .nsv
+ !insertmacro ${Action} .nuv
+ !insertmacro ${Action} .oga
+ !insertmacro ${Action} .ogg
+ !insertmacro ${Action} .ogm
+ !insertmacro ${Action} .ogv
+ !insertmacro ${Action} .oma
+ !insertmacro ${Action} .opus
+ !insertmacro ${Action} .rec
+ !insertmacro ${Action} .rmi
+ !insertmacro ${Action} .s3m
+ !insertmacro ${Action} .spx
+ !insertmacro ${Action} .tak
+ !insertmacro ${Action} .tod
+ !insertmacro ${Action} .ts
+ !insertmacro ${Action} .tta
+ !insertmacro ${Action} .vob
+ !insertmacro ${Action} .voc
+ !insertmacro ${Action} .vqf
+ !insertmacro ${Action} .vro
+ !insertmacro ${Action} .wav
+ !insertmacro ${Action} .webm
+ !insertmacro ${Action} .wma
+ !insertmacro ${Action} .wmv
+ !insertmacro ${Action} .wtv
+ !insertmacro ${Action} .wv
+ !insertmacro ${Action} .xa
+ !insertmacro ${Action} .xesc
+ !insertmacro ${Action} .xm
+!macroend
+!macro RegisterType EXT
+ WriteRegStr HKCU "Software\RMP\Capabilities\FileAssociations" "${EXT}" "RMP.Media"
+ WriteRegStr HKCU "Software\Classes\${EXT}\OpenWithProgids" "RMP.Media" ""
+!macroend
+!macro RemoveType EXT
+ DeleteRegValue HKCU "Software\Classes\${EXT}\OpenWithProgids" "RMP.Media"
+!macroend

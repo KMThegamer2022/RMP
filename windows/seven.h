@@ -1,5 +1,3 @@
-enum { CAP_MIN=410,CAP_MAX,CAP_CLOSE,CAP_MENU };
-static bool sevenFrame(void){return skin==SEVEN&&!contrastMode&&!fullscreen;}
 /* Premultiplied BGRA carries the tint to DWM. Even over a black or
    unavailable backdrop the tint remains visible. Tiles share window coordinates. */
 static HDC sheenDC;
@@ -39,30 +37,9 @@ static void sevenSurface(HDC dc,HWND child){
  POINT offset={0};if(child!=mainwin)MapWindowPoints(child,mainwin,&offset,1);
  int save=SaveDC(dc);SetViewportOrgEx(dc,-offset.x,-offset.y,NULL);
  fillColor(dc,area,color(0xbdd4e7));
- RECT top=area;top.bottom=scale(32);drawGlassBand(dc,top,child!=mainwin);
- RECT command=area;command.top=scale(32);command.bottom=scale(56);
- blend(dc,command,0xf9fcff,0xdce7f2);
  RECT deck=area;deck.top=deck.bottom-scale(100);
  drawGlassBand(dc,deck,child!=mainwin);
  RECT line=deck;line.bottom=line.top+1;fillColor(dc,line,RGB(255,255,255));
  RECT edge=area;InflateRect(&edge,-1,-1);SetDCBrushColor(dc,color(0xf3fbff));FrameRect(dc,&edge,GetStockObject(DC_BRUSH));
  RestoreDC(dc,save);
-}
-static void captionControl(DRAWITEMSTRUCT *d){
- RECT r=d->rcItem;bool close=d->CtlID==CAP_CLOSE;int mid=(r.bottom+r.top)/2;
- POINT cursor;GetCursorPos(&cursor);bool hot=WindowFromPoint(cursor)==d->hwndItem;
- RECT upper=r,lower=r;upper.bottom=lower.top=mid;
- blend(d->hDC,upper,hot?0xffffff:close?0xffd3c2:0xf4fcff,hot?(close?0xff7952:0x73cafa):close?0xf68b73:0xc4dae9);
- blend(d->hDC,lower,close?0xdb543a:0x9cbad0,close?0xb83b26:0xbed7ea);
- SetDCBrushColor(d->hDC,color(close?0x914630:0x768da2));FrameRect(d->hDC,&r,GetStockObject(DC_BRUSH));
- SetBkMode(d->hDC,TRANSPARENT);SetTextColor(d->hDC,color(close?0xffffff:0x233e50));SelectObject(d->hDC,uiFont);
- DrawTextW(d->hDC,close?L"×":d->CtlID==CAP_MIN?L"−":IsZoomed(mainwin)?L"❐":L"□",-1,&r,DT_CENTER|DT_SINGLELINE|DT_VCENTER);
-}
-static void sevenTitle(HWND w,HDC dc){
- RECT r;GetClientRect(w,&r);r.left=scale(29);r.right-=scale(125);r.bottom=scale(30);
- wchar_t title[512];GetWindowTextW(w,title,512);SelectObject(dc,uiFont);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,color(0x152d42));
- DrawIconEx(dc,scale(8),scale(7),brandIcon,scale(16),scale(16),0,NULL,DI_NORMAL);
- UINT format=DT_SINGLELINE|DT_VCENTER|DT_END_ELLIPSIS|DT_NOPREFIX;
- SetTextColor(dc,color(0xf1faff));for(int dy=-1;dy<=1;dy++)for(int dx=-1;dx<=1;dx++){RECT halo=r;OffsetRect(&halo,dx,dy);DrawTextW(dc,title,-1,&halo,format);}
- SetTextColor(dc,color(0x183149));DrawTextW(dc,title,-1,&r,format);
 }

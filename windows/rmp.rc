@@ -10,3 +10,4 @@ BEGIN
  PUSHBUTTON "Cancel",IDCANCEL,202,34,50,14
 END
 1 24 "windows/rmp.manifest"
+2 ICON "assets/vlc-cone.ico"

@@ -53,3 +53,17 @@ static NSColor *rgb(unsigned v) {
  if(self.window.firstResponder==self){[rgb(t.accent)setStroke];path.lineWidth=2;[path stroke];}
 }
 @end
+
+@interface VolumeSlider:NSSlider
+@property BOOL wedge;
+@end
+@implementation VolumeSlider
+-(void)drawRect:(NSRect)dirty{
+ if(!self.wedge){[super drawRect:dirty];return;}
+ NSRect r=NSInsetRect(self.bounds,4,2);NSBezierPath *triangle=[NSBezierPath bezierPath];
+ [triangle moveToPoint:NSMakePoint(NSMinX(r),NSMaxY(r))];[triangle lineToPoint:NSMakePoint(NSMaxX(r),NSMinY(r))];[triangle lineToPoint:NSMakePoint(NSMaxX(r),NSMaxY(r))];[triangle closePath];
+ [rgb(0xe2e2e2)setFill];[triangle fill];[NSGraphicsContext saveGraphicsState];[triangle addClip];
+ [rgb(0x4bc23b)setFill];NSRectFill(NSMakeRect(r.origin.x,r.origin.y,r.size.width*self.doubleValue/100,r.size.height));
+ [NSGraphicsContext restoreGraphicsState];[rgb(0x777777)setStroke];[triangle stroke];
+}
+@end

@@ -1,3 +1,4 @@
 RMP includes libVLC and playback modules from the VideoLAN VLC 3.0.24 macOS arm64 distribution. VLC, libVLC and the included codecs are the work of VideoLAN and their respective contributors.
 Project: https://www.videolan.org/vlc/
 Corresponding VLC release source and build recipes: https://download.videolan.org/pub/videolan/vlc/3.0.24/
+The VLC-theme cone artwork comes from VideoLAN VLC 3.0.24.

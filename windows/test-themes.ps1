@@ -28,11 +28,11 @@ function Check-Menu($w,$id) {
 $p=Start-Process $Player -ArgumentList $Fixture -PassThru
 try {
  $w=Get-Window $p
- Check-Menu $w 314
- foreach ($id in 310..314) {
+ Check-Menu $w 315
+ foreach ($id in 310..315) {
   [void][ThemeTest]::SendMessage($w,273,[IntPtr]$id,[IntPtr]::Zero)
-  if($id -ne 311){Check-Menu $w $id}
-  if ($id -eq 311) {
+  Check-Menu $w $id
+  if ($id -eq 311 -or $id -eq 315) {
    [void][ThemeTest]::SetWindowPos($w,[IntPtr](-1),10,10,900,570,0x40)
    Start-Sleep -Milliseconds 700
    $rect=[Drawing.Rectangle]::Empty
@@ -40,10 +40,11 @@ try {
    $bmp=[Drawing.Bitmap]::new($rect.Width-$rect.X,$rect.Height-$rect.Y)
    $g=[Drawing.Graphics]::FromImage($bmp) 
    $g.CopyFromScreen($rect.X,$rect.Y,0,0,$bmp.Size)
-   $bmp.Save((Join-Path $pwd 'RMP-Windows7-preview.png'));$g.Dispose();$bmp.Dispose()
+   $file=if($id -eq 311){'RMP-Windows7-preview.png'}else{'RMP-VLC-preview.png'}
+   $bmp.Save((Join-Path $pwd $file));$g.Dispose();$bmp.Dispose()
   }
   if ((Get-ItemPropertyValue 'HKCU:\Software\RMP' Theme) -ne ($id-310)){throw 'Preference was not saved'}
  }
 } finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
 $p=Start-Process $Player -PassThru
-try {Check-Menu (Get-Window $p) 314} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
+try {Check-Menu (Get-Window $p) 315} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}

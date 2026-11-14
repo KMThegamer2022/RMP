@@ -233,3 +233,10 @@ pub unsafe extern "C" fn ap_select(p: &Player, sub: bool, id: i32) -> bool {
         libvlc_audio_set_track(p.player, id)
     }) == 0
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn ap_stop(p: &Player) {
+    if !p.player.is_null() {
+        libvlc_media_player_stop(p.player);
+    }
+}
