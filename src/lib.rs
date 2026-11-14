@@ -31,6 +31,7 @@ extern "C" {
     fn libvlc_media_player_play(p: Handle) -> i32;
     fn libvlc_media_player_stop(p: Handle);
     fn libvlc_media_player_set_pause(p: Handle, v: i32);
+    fn libvlc_media_player_has_vout(p: Handle) -> u32;
     fn libvlc_media_player_get_state(p: Handle) -> i32;
     fn libvlc_media_player_get_time(p: Handle) -> i64;
     fn libvlc_media_player_get_length(p: Handle) -> i64;
@@ -223,6 +224,10 @@ pub unsafe extern "C" fn ap_play(p: &mut Player, i: usize) -> bool {
     let ok = libvlc_media_player_play(p.player) == 0;
     libvlc_audio_set_volume(p.player, p.volume);
     ok
+}
+#[no_mangle]
+pub unsafe extern "C" fn ap_has_video(p: &Player) -> bool {
+    !p.player.is_null() && libvlc_media_player_has_vout(p.player) != 0
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_state(p: &Player) -> i32 {
