@@ -46,7 +46,7 @@ static int scale(int value){
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
- int height=scale(classic?68:100), deck=y-height;
+ int height=scale(classic?68:STANDARD_TRANSPORT_HEIGHT), deck=y-height;
  MoveWindow(video,frame,top,x-2*frame,max(1,(fullscreen?y:deck)-top),TRUE);
  int logo=scale(classic?120:96);
  MoveWindow(idleLogo,(x-logo)/2,((fullscreen?y:deck)-top-logo)/2,logo,logo,TRUE);
@@ -70,17 +70,9 @@ static void layout(HWND w,int x,int y){
 }
 static void applyTheme(HWND w,int value){
  skin=value;
- if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(color(themes[skin].panel));
+ if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(themes[skin].panel));
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
- OSVERSIONINFOW version={sizeof(version)};GetVersionExW(&version);
- for(HWND child=GetWindow(w,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT)){
- LONG_PTR ex=GetWindowLongPtrW(child,GWL_EXSTYLE);
- bool opaque=glass && version.dwMajorVersion>=10;
- if(opaque){SetWindowLongPtrW(child,GWL_EXSTYLE,ex|WS_EX_LAYERED);SetLayeredWindowAttributes(child,0,255,LWA_ALPHA);}
- else if(ex&WS_EX_LAYERED)SetWindowLongPtrW(child,GWL_EXSTYLE,ex&~WS_EX_LAYERED);
- }
-
  HWND host=fullscreen?transport:w;
  int ids[]={PLAY,NEXT,PREV,STOP,FULL,OPEN,THEME_BUTTON,LIST,REPEAT,SHUFFLE};for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
  HWND button=GetDlgItem(host,ids[i]);SendMessageW(button,BM_SETSTYLE,skin==SEVEN?BS_PUSHBUTTON:BS_OWNERDRAW,TRUE);}
@@ -92,7 +84,7 @@ static void applyTheme(HWND w,int value){
  COLORREF captionInk=contrastMode?0xffffffff:color(skin==XP||skin==MAC||skin==RMP_DEFAULT?0xffffff:0x152334);
  if(skin==SEVEN)captionInk=0xffffffff;
  DwmSetWindowAttribute(w,36,&captionInk,sizeof(captionInk));
- int corners=skin==MODERN||skin==XP?1:2;
+ int corners=skin==SEVEN?0:(skin==MODERN||skin==XP?1:2);
  DwmSetWindowAttribute(w,33,&corners,sizeof(corners));
  HFONT nextFont=CreateFontW(-scale(skin==XP?13:14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,skin==XP?L"Tahoma":L"Segoe UI");
  if(nextFont){HFONT old=uiFont;uiFont=nextFont;
@@ -190,7 +182,14 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_ERASEBKGND:{
  RECT r;GetClientRect(w,&r);HDC dc=(HDC)wp;Theme t=themes[skin];
  if(contrastMode)FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
- else if(skin==SEVEN){sevenSurface(dc,w);}
+ else if(skin==SEVEN){
+ FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
+ if(glass){
+ /* A zero-alpha background exposes the DWM frame in this margin. */
+ r.top=max(r.top,r.bottom-scale(STANDARD_TRANSPORT_HEIGHT));
+ FillRect(dc,&r,GetStockObject(BLACK_BRUSH));
+ }
+ }
 
  else{fillColor(dc,r,color(t.panel));if(skin==XP){
  RECT frame=r;frame.bottom-=scale(100);fillColor(dc,frame,color(0x1256ce));
@@ -216,7 +215,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  int xpos=track.left+MulDiv(track.right-track.left,SendMessageW(position,TBM_GETPOS,0,0),1000);
  RECT thumb={xpos-scale(3),mid-scale(6),xpos+scale(3),mid+scale(6)};blend(draw->hdc,thumb,0xffffff,0xa0a0a0);}
  return CDRF_SKIPDEFAULT;}
- if(draw->dwDrawStage==CDDS_PREPAINT){if(skin==SEVEN)sevenSurface(draw->hdc,notice->hwndFrom);return CDRF_NOTIFYITEMDRAW;}
+ if(draw->dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
  if(draw->dwDrawStage==CDDS_ITEMPREPAINT){
  RECT r=draw->rc;Theme t=themes[skin];
  if(draw->dwItemSpec==TBCD_CHANNEL){
@@ -227,7 +226,6 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  return CDRF_SKIPDEFAULT;}
  if(draw->dwItemSpec==TBCD_THUMB){
  if(skin==XP){fillColor(draw->hdc,r,color(t.face));DrawEdge(draw->hdc,&r,EDGE_RAISED,BF_RECT);RECT grip=r;InflateRect(&grip,-2,-2);grip.bottom=grip.top+scale(3);fillColor(draw->hdc,grip,color(0x60a437));}
- else if(skin==SEVEN){blend(draw->hdc,r,0xf7fcff,0x71a5d1);DrawEdge(draw->hdc,&r,EDGE_RAISED,BF_RECT);}
  else{fillColor(draw->hdc,r,color(t.accent));}
  return CDRF_SKIPDEFAULT;}
  }}
@@ -235,7 +233,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
  case WM_CTLCOLORSTATIC:
  if((HWND)lp==video || (HWND)lp==idleLogo){SetBkColor((HDC)wp,RGB(0,0,0));return (LRESULT)GetStockObject(BLACK_BRUSH);}
- if(skin==SEVEN&&!contrastMode){sevenSurface((HDC)wp,(HWND)lp);SetBkMode((HDC)wp,TRANSPARENT);SetTextColor((HDC)wp,color(0x18324c));return (LRESULT)GetStockObject(NULL_BRUSH);}
+ if(skin==SEVEN)break;
  if((HWND)lp!=video && (HWND)lp!=idleLogo && panelBrush && !contrastMode){
  SetBkColor((HDC)wp,color(themes[skin].panel));SetTextColor((HDC)wp,color(themes[skin].text));return (LRESULT)panelBrush;}break;
  case WM_INITMENUPOPUP:{HMENU m=(HMENU)wp;if(m!=queue&&m!=audio&&m!=subs)break;while(GetMenuItemCount(m)>0)DeleteMenu(m,0,MF_BYPOSITION);
@@ -255,7 +253,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:freeSheen();KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }

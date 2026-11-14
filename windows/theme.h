@@ -21,26 +21,22 @@ static void blend(HDC dc,RECT r,unsigned a,unsigned b){
  {r.right,r.bottom,((b>>16)&255)<<8,((b>>8)&255)<<8,(b&255)<<8,0}};
  GRADIENT_RECT g={0,1};GradientFill(dc,v,2,&g,1,GRADIENT_FILL_RECT_V);
 }
-#include "seven.h"
 static void paintButton(DRAWITEMSTRUCT *d){
  Theme t=themes[skin];if(skin==RMP_DEFAULT && d->CtlID==PLAY){t.face=t.accent;t.edge=0xdd6238;t.text=0x16191f;}RECT r=d->rcItem;HDC dc=d->hDC;
  if(contrastMode){DrawFrameControl(dc,&r,DFC_BUTTON,DFCS_BUTTONPUSH|((d->itemState&ODS_SELECTED)?DFCS_PUSHED:0));}
  else{
- if(skin==SEVEN)sevenSurface(dc,d->hwndItem);else fillColor(dc,r,color(t.panel));InflateRect(&r,-1,-1);
- bool orb=skin==SEVEN && d->CtlID==PLAY;
- if(orb){int center=(r.left+r.right)/2,rad=(r.bottom-r.top)/2;r.left=center-rad;r.right=center+rad;}
- int corner=orb?r.bottom-r.top:scale(t.radius*2);
+ fillColor(dc,r,color(t.panel));InflateRect(&r,-1,-1);
+ int corner=scale(t.radius*2);
  HRGN region=CreateRoundRectRgn(r.left,r.top,r.right+1,r.bottom+1,corner,corner);
  int saved=SaveDC(dc);ExtSelectClipRgn(dc,region,RGN_AND);
- if(orb){RECT upper=r,lower=r;upper.bottom=lower.top=(r.top+r.bottom)/2;blend(dc,upper,0xd7f6ff,0x1953ae);blend(dc,lower,0x2988df,0x103369);}
- else if(skin==SEVEN||skin==XP)blend(dc,r,t.highlight,(d->itemState&ODS_SELECTED)?t.edge:t.face);
+ if(skin==XP)blend(dc,r,t.highlight,(d->itemState&ODS_SELECTED)?t.edge:t.face);
  else fillColor(dc,r,color((d->itemState&ODS_SELECTED)?t.edge:t.face));
  RestoreDC(dc,saved);SetDCBrushColor(dc,color(t.edge));if(skin!=MODERN)FrameRgn(dc,region,GetStockObject(DC_BRUSH),1,1);DeleteObject(region);
  }
  wchar_t text[80];GetWindowTextW(d->hwndItem,text,80);SelectObject(dc,uiFont);
  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,contrastMode?GetSysColor(COLOR_BTNTEXT):color(t.text));
  if(!contrastMode && skin!=MAC){
- if(d->CtlID==PLAY){wcscpy(text,wcsstr(text,L"Pause")?L"Ⅱ":L"▶");if(skin==SEVEN)SetTextColor(dc,RGB(255,255,255));}
+ if(d->CtlID==PLAY){wcscpy(text,wcsstr(text,L"Pause")?L"Ⅱ":L"▶");}
  if(d->CtlID==PREV)wcscpy(text,L"❘◀");
  if(d->CtlID==NEXT)wcscpy(text,L"▶❘");
  }
