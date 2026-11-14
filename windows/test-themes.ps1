@@ -22,6 +22,7 @@ public class ThemeTest {
  [DllImport("user32")] public static extern bool PrintWindow(IntPtr w,IntPtr dc,uint flags);
  [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out System.Drawing.Rectangle rect);
  [DllImport("user32")] public static extern IntPtr SendMessage(IntPtr w,uint msg,IntPtr wp,IntPtr lp);
+ [DllImport("user32",CharSet=CharSet.Unicode)] public static extern bool SetWindowText(IntPtr w,string text);
  [DllImport("user32")] public static extern IntPtr GetMenu(IntPtr w);
  [DllImport("user32")] public static extern IntPtr GetSubMenu(IntPtr m,int index);
  [DllImport("user32")] public static extern int GetMenuItemCount(IntPtr m);
@@ -45,7 +46,20 @@ try {
  foreach ($id in 310..315) {
   [void][ThemeTest]::SendMessage($w,273,[IntPtr]$id,[IntPtr]::Zero)
   Check-Menu $w $id
-  if ($id -eq 311 -or $id -eq 315) {
+  if ($id -in @(311,312)) {
+   $rows=[ThemeTest]::GetDlgItem($w,516)
+   if(![ThemeTest]::IsWindowVisible($rows)){throw 'Missing library or XP now-playing queue'}
+   $before=[ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32()
+   if($before -lt 1){throw 'No real media in the track list'}
+   if($id -eq 311){
+    $search=[ThemeTest]::GetDlgItem($w,515)
+    [void][ThemeTest]::SetWindowText($search,'does-not-exist-63349')
+    $found=[ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero)
+    if($found.ToInt32()){throw 'Library search did not filter the rows'}
+    [void][ThemeTest]::SetWindowText($search,'')
+   }
+  }
+  if ($id -in @(311,312,315)) {
    [void][ThemeTest]::SetWindowPos($w,[IntPtr](-1),10,10,900,570,0x40)
    Start-Sleep -Milliseconds 700
    $rect=[Drawing.Rectangle]::Empty
@@ -53,11 +67,17 @@ try {
    $bmp=[Drawing.Bitmap]::new($rect.Width-$rect.X,$rect.Height-$rect.Y)
    $g=[Drawing.Graphics]::FromImage($bmp) 
    $g.CopyFromScreen($rect.X,$rect.Y,0,0,$bmp.Size)
-   $file=if($id -eq 311){'RMP-Windows7-preview.png'}else{'RMP-VLC-preview.png'}
+   $file=if($id -eq 311){'RMP-Windows7-preview.png'}elseif($id -eq 312){'RMP-XP-preview.png'}else{'RMP-VLC-preview.png'}
    $bmp.Save((Join-Path $pwd $file));$g.Dispose();$bmp.Dispose()
   }
   if ((Get-ItemPropertyValue 'HKCU:\Software\RMP' Theme) -ne ($id-310)){throw 'Preference was not saved'}
  }
+ $volume=[ThemeTest]::GetDlgItem($w,108)
+ $initialVolume=[ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32()
+ [void][ThemeTest]::SendMessage($volume,0x20a,[IntPtr](120 -shl 16),[IntPtr]::Zero)
+ if([ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -le $initialVolume){throw 'Wheel up did not raise volume'}
+ [void][ThemeTest]::SendMessage($volume,0x20a,[IntPtr](-120 -shl 16),[IntPtr]::Zero)
+ if([ThemeTest]::SendMessage($volume,0x400,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -ne $initialVolume){throw 'Wheel down did not restore volume'}
  $button=[ThemeTest]::GetDlgItem($w,102)
  $oldFont=[ThemeTest]::SendMessage($button,49,[IntPtr]::Zero,[IntPtr]::Zero)
  [void][ThemeTest]::SetCursorPos(10,10)

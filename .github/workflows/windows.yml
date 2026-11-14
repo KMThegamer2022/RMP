@@ -47,7 +47,7 @@ jobs:
           7z a -tzip RMP-Windows-x64.zip ./build/RMP
       - name: Switch all themes and verify preference restoration
         shell: pwsh
-        run: ./windows/test-themes.ps1 ./build/RMP/RMP.exe (Resolve-Path fixture.wav)
+        run: ./windows/test-themes.ps1 ./build/RMP/RMP.exe (Resolve-Path packaging/fixtures/open-video.mp4)
       - name: Exercise manual update command against GitHub
         shell: pwsh
         run: ./windows/test-update.ps1 ./build/RMP/RMP.exe
@@ -106,6 +106,7 @@ jobs:
           path: |
             RMP-Windows-x64.zip
             RMP-Setup-x64.exe
+            RMP-XP-preview.png
             RMP-Windows7-preview.png
             RMP-VLC-preview.png
   publish:
