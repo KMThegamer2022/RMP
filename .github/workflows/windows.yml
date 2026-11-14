@@ -1,0 +1,52 @@
+name: Build Windows player
+on:
+  push:
+    branches: [main]
+    tags: ['v*-windows']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Rust target
+        run: rustup target add x86_64-pc-windows-gnu
+      - name: Fetch pinned VideoLAN runtime
+        shell: pwsh
+        run: |
+          curl.exe --fail --location --retry 3 https://download.videolan.org/pub/videolan/vlc/3.0.24/win64/vlc-3.0.24-win64.7z -o vlc.7z
+          if ((Get-FileHash vlc.7z).Hash -ne '1ED59C09152E78AFF84663FA76EFAB26057716576DB74332858810E5EF54AE1F') { throw 'Unexpected VLC digest' }
+          7z x -y vlc.7z
+      - name: Compile and bundle RMP
+        shell: bash
+        run: |
+          export PATH="/c/mingw64/bin:/c/msys64/mingw64/bin:$PATH"
+          CC=gcc WINDRES=windres bash windows/build.sh vlc-3.0.24 build/RMP
+      - name: Exercise packaged playback
+        shell: pwsh
+        run: |
+          python -c "import wave; f=wave.open('fixture.wav','wb'); f.setparams((1,2,44100,0,'NONE','')); f.writeframes(bytes(44100*2*5)); f.close()"
+          $p = Start-Process build/RMP/RMP.exe -ArgumentList '--smoke-test', (Resolve-Path fixture.wav) -PassThru
+          if (!$p.WaitForExit(40000)) { $p.Kill(); throw 'Playback test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Playback test failed ($($p.ExitCode))" }
+          7z a -tzip RMP-Windows-x64.zip ./build/RMP
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RMP-Windows-x64
+          path: RMP-Windows-x64.zip
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RMP-Windows-x64
+      - name: Publish Windows release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" RMP-Windows-x64.zip --repo "$GITHUB_REPOSITORY" --verify-tag --title "RMP 1.0.0 for Windows" --notes "Extract the entire ZIP, then launch RMP.exe. Includes the x64 playback runtime and codecs."

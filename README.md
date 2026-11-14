@@ -16,3 +16,9 @@ The Rust static library in src/lib.rs owns the queue, playback state and libVLC 
 ## Verification
 
 Tested locally with H.264 video and AAC audio in MKV, embedded SRT subtitles, FLAC audio, and fast-start MP4 over HTTP. Format and stream compatibility depend on codecs, encryption and server behavior.
+
+## Windows x64
+
+Extract the entire Windows release ZIP to one folder and run RMP.exe. Use Open for a file, File → Open network stream for a URL, or drag files onto the window. Queue, Audio track and Subtitles are in the menu bar. F11 toggles fullscreen. The executable uses the same Rust playback core and a native Win32 interface.
+
+GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, and exercises WAV playback on a Windows runner. A successful Windows release tag publishes the ZIP. See [.github/workflows/windows.yml](.github/workflows/windows.yml) for the toolchain and packaging steps.
