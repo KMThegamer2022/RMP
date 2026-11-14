@@ -46,6 +46,7 @@ static int scale(int value){
 #include "backdrop.h"
 #include "fullscreen.h"
 #include "glass-controls.h"
+#include "seven-transport.h"
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
@@ -63,10 +64,11 @@ static void layout(HWND w,int x,int y){
  int left=scale(8);
  for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
  HWND b=GetDlgItem(host,ids[i]);bool extra=ids[i]==LIST||ids[i]==REPEAT||ids[i]==SHUFFLE;
- bool show=classic?(ids[i]!=OPEN):!extra;
+ bool show=skin==SEVEN?ids[i]!=OPEN:classic?(ids[i]!=OPEN):!extra;
  ShowWindow(b,show?SW_SHOWNA:SW_HIDE);if(!show)continue;
  int width=scale(classic?(i==0?40:32):(i==2?48:i==4?64:76));
- MoveWindow(b,left,cy,width,scale(classic?29:36),TRUE);left+=width+scale(classic?2:4);
+ if(skin==SEVEN)width=scale(sevenWidths[i]);
+ MoveWindow(b,left,cy,width,scale(skin==SEVEN?30:classic?29:36),TRUE);left+=width+scale(classic?2:4);
  }
  MoveWindow(volumeLabel,x-scale(155),cy,scale(48),scale(29),TRUE);MoveWindow(level,x-scale(103),cy+scale(2),scale(96),scale(24),TRUE);
 
@@ -78,7 +80,7 @@ static void applyTheme(HWND w,int value){
  updateGlass(w);
  HWND host=fullscreen?transport:w;
  int ids[]={PLAY,NEXT,PREV,STOP,FULL,OPEN,LIST,REPEAT,SHUFFLE};for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
- HWND button=GetDlgItem(host,ids[i]);SendMessageW(button,BM_SETSTYLE,skin==SEVEN?BS_PUSHBUTTON:BS_OWNERDRAW,TRUE);}
+ HWND button=GetDlgItem(host,ids[i]);SendMessageW(button,BM_SETSTYLE,skin==SEVEN && contrastMode?BS_PUSHBUTTON:BS_OWNERDRAW,TRUE);}
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)(skin==VLC_THEME?coneIcon:brandIcon),0);
  /* Windows 11 honors caption color. Older versions keep their native caption. */
  COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:skin==MODERN?0xf5f5f5:themes[skin].panel);
@@ -159,6 +161,7 @@ static HMENU submenu(HMENU parent,const wchar_t *name){
 }
 #include "caption.h"
 #include "update.h"
+#include "video-click.h"
 static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
  case WM_NCPAINT:case WM_NCACTIVATE:case WM_SETTEXT:{
@@ -180,6 +183,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
+ case WM_INPUT:videoMouseInput((HRAWINPUT)lp);break;
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
  case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
  case WM_DWMCOMPOSITIONCHANGED:case WM_SETTINGCHANGE:case WM_THEMECHANGED:{
@@ -235,7 +239,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  return CDRF_SKIPDEFAULT;}
  }}
  break;}
- case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
+ case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){if(skin==SEVEN && !contrastMode)paintSevenFace((DRAWITEMSTRUCT*)lp);else paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
  case WM_CTLCOLORSTATIC:
  if((HWND)lp==video || (HWND)lp==idleLogo){SetBkColor((HDC)wp,RGB(0,0,0));return (LRESULT)GetStockObject(BLACK_BRUSH);}
  if(skin==SEVEN)break;
@@ -257,7 +261,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:for(int i=0;i<9;i++)if(sevenIcons[i])DestroyIcon(sevenIcons[i]);KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }
@@ -267,6 +271,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
  WNDCLASSW c={0};c.lpfnWndProc=windowproc;c.hInstance=h;c.lpszClassName=L"RMPPlayer";c.hIcon=LoadIconW(h,MAKEINTRESOURCEW(1));c.hCursor=LoadCursor(NULL,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&c);
  WNDCLASSW floating={0};floating.lpfnWndProc=transportProc;floating.hInstance=h;floating.lpszClassName=L"RMPTransport";floating.hCursor=c.hCursor;RegisterClassW(&floating);
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
+ RAWINPUTDEVICE mouse={1,2,0,w};RegisterRawInputDevices(&mouse,1,sizeof(mouse));
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
  ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
 }

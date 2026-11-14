@@ -11,3 +11,12 @@ BEGIN
 END
 1 24 "windows/rmp.manifest"
 2 ICON "assets/vlc-cone.ico"
+410 RCDATA "assets/seven/play.png"
+411 RCDATA "assets/seven/prev.png"
+412 RCDATA "assets/seven/stop.png"
+413 RCDATA "assets/seven/next.png"
+414 RCDATA "assets/seven/full.png"
+415 RCDATA "assets/seven/queue.png"
+416 RCDATA "assets/seven/repeat.png"
+417 RCDATA "assets/seven/shuffle.png"
+418 RCDATA "assets/seven/pause.png"

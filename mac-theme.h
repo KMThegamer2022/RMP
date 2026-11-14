@@ -23,6 +23,7 @@ static NSColor *rgb(unsigned v) {
 @end
 @interface TransportButton:NSButton
 @property NSInteger skin;
+@property BOOL glassGlow;
 @end
 @implementation TransportButton
 -(NSSize)intrinsicContentSize {NSSize s=super.intrinsicContentSize;s.width+=14;s.height=30;return s;}
@@ -47,6 +48,11 @@ static NSColor *rgb(unsigned v) {
  if(transport && self.skin!=MAC){
  caption=play?([self.title isEqualToString:@"Pause"]?@"Ⅱ":@"▶"):(prev?@"❘◀":@"▶❘");
  attrs=@{NSFontAttributeName:[NSFont systemFontOfSize:play?17:13],NSForegroundColorAttributeName:rgb(orb?0xffffff:t.text)};
+ }
+ if(self.glassGlow){
+  NSShadow *halo=[NSShadow new];halo.shadowOffset=NSZeroSize;halo.shadowBlurRadius=2;
+  halo.shadowColor=NSColor.whiteColor;
+  NSMutableDictionary *lit=[attrs mutableCopy];lit[NSShadowAttributeName]=halo;attrs=lit;
  }
  NSSize size=[caption sizeWithAttributes:attrs];
  [caption drawAtPoint:NSMakePoint(NSMidX(r)-size.width/2,NSMidY(r)-size.height/2) withAttributes:attrs];

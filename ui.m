@@ -129,6 +129,13 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  window.collectionBehavior=NSWindowCollectionBehaviorFullScreenPrimary;[window center];
  window.contentView=[[ThemeSurface alloc]initWithFrame:window.contentView.bounds];NSView *root=window.contentView;root.wantsLayer=YES;
  screen=[NSView new];screen.wantsLayer=YES;screen.layer.backgroundColor=NSColor.blackColor.CGColor;
+ [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event){
+  if(event.window==self->window && event.clickCount==2){
+   NSPoint point=[self->screen convertPoint:event.locationInWindow fromView:nil];
+   if(NSPointInRect(point,self->screen.bounds)){[self full:nil];return nil;}
+  }
+  return event;
+ }];
  cone=[NSImageView new];cone.image=[NSImage imageNamed:@"vlc-cone"];[screen addSubview:cone];cone.translatesAutoresizingMaskIntoConstraints=NO;
  [NSLayoutConstraint activateConstraints:@[[cone.centerXAnchor constraintEqualToAnchor:screen.centerXAnchor],[cone.centerYAnchor constraintEqualToAnchor:screen.centerYAnchor],[cone.widthAnchor constraintEqualToConstant:120],[cone.heightAnchor constraintEqualToConstant:120]]];
  welcome=label(@"RMP",42,YES);welcome.textColor=[NSColor colorWithWhite:0.65 alpha:1];

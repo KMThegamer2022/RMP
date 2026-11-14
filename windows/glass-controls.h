@@ -44,7 +44,7 @@ static bool paintGlassControl(HWND h,HDC dc){
  return SUCCEEDED(result);
 }
 static LRESULT CALLBACK glassControlProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
- if(glass && GetParent(h)==mainwin){
+ if(glass && GetParent(h)==mainwin && (h==position||h==level||h==clocktext||h==volumeLabel)){
   if(msg==WM_ERASEBKGND)return 1;
   if(msg==WM_PAINT){
    PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);
