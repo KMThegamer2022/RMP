@@ -37,28 +37,44 @@ static int scale(int value){
  HDC dc=GetDC(mainwin); int dpi=GetDeviceCaps(dc,LOGPIXELSY); ReleaseDC(mainwin,dc);
  return MulDiv(value,dpi,96);
 }
+#include "theme.h"
 static void updateGlass(HWND w){
  BOOL composed=FALSE;
  HIGHCONTRASTW contrast={sizeof(contrast)};
  SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0);
- glass=SUCCEEDED(DwmIsCompositionEnabled(&composed)) && composed && !(contrast.dwFlags&HCF_HIGHCONTRASTON);
- MARGINS frame={0,0,glass?scale(12):0,0};
+ contrastMode=(contrast.dwFlags&HCF_HIGHCONTRASTON)!=0;
+ DwmIsCompositionEnabled(&composed);
+ OSVERSIONINFOW os={sizeof(os)};GetVersionExW(&os);
+ glass=skin==SEVEN && composed && !contrastMode && os.dwMajorVersion==6 && os.dwMinorVersion==1;
+ MARGINS frame={0,0,glass?scale(12):0,glass?scale(100):0};
  if(composed && FAILED(DwmExtendFrameIntoClientArea(w,&frame)))glass=false;
  InvalidateRect(w,NULL,TRUE);
 }
 static void layout(HWND w,int x,int y){
- int top=glass?scale(12):0;
+ int top=skin==SEVEN||skin==XP?scale(12):0;
  int deck=y-scale(100),cy=y-scale(55),mid=x/2;
  MoveWindow(video,0,top,x,max(1,deck-top),TRUE);
  MoveWindow(idleLogo,(x-scale(96))/2,(deck-top-scale(96))/2,scale(96),scale(96),TRUE);
  MoveWindow(position,scale(16),deck+scale(8),x-scale(166),scale(27),TRUE);
  MoveWindow(clocktext,x-scale(147),deck+scale(6),scale(140),scale(28),TRUE);
  MoveWindow(GetDlgItem(w,OPEN),scale(16),cy,scale(87),scale(33),TRUE);
+ MoveWindow(GetDlgItem(w,THEME_BUTTON),scale(109),cy,scale(78),scale(33),TRUE);
  MoveWindow(GetDlgItem(w,PREV),mid-scale(123),cy,scale(72),scale(33),TRUE);
  MoveWindow(play,mid-scale(46),cy-scale(4),scale(92),scale(41),TRUE);
  MoveWindow(GetDlgItem(w,NEXT),mid+scale(51),cy,scale(72),scale(33),TRUE);
  MoveWindow(volumeLabel,x-scale(170),cy,scale(52),scale(33),TRUE);
  MoveWindow(level,x-scale(118),cy+scale(4),scale(102),scale(26),TRUE);
+}
+static void applyTheme(HWND w,int value){
+ skin=value;
+ if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(color(themes[skin].panel));
+ CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
+ updateGlass(w);
+ /* Windows 11 honors caption color. Older versions keep their native caption. */
+ COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:themes[skin].panel);
+ DwmSetWindowAttribute(w,35,&caption,sizeof(caption));
+ RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
+ RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
 }
 static wchar_t *wide(const char *s){
  int n=MultiByteToWideChar(CP_UTF8,0,s,-1,NULL,0);
@@ -114,25 +130,35 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_CREATE:{
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
  HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
- queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");SetMenu(w,bar);
+ queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");for(int i=0;i<THEME_COUNT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);SetMenu(w,bar);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|WS_CLIPCHILDREN);player=ap_create(video);if(!player)return -1;
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
  SendMessageW(idleLogo,STM_SETICON,(WPARAM)brandIcon,0);
- control(w,L"BUTTON",L"Open file…",OPEN,0);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_DEFPUSHBUTTON);control(w,L"BUTTON",L"Previous",PREV,0);control(w,L"BUTTON",L"Next",NEXT,0);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
+ control(w,L"BUTTON",L"Open file…",OPEN,BS_OWNERDRAW);control(w,L"BUTTON",L"Theme ▾",THEME_BUTTON,BS_OWNERDRAW);play=control(w,L"BUTTON",L"▶  Play",PLAY,BS_OWNERDRAW);control(w,L"BUTTON",L"Previous",PREV,BS_OWNERDRAW);control(w,L"BUTTON",L"Next",NEXT,BS_OWNERDRAW);volumeLabel=control(w,L"STATIC",L"Volume",0,SS_CENTERIMAGE);
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
- SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);return 0;}
+ SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
  case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
  case WM_DWMCOMPOSITIONCHANGED:case WM_SETTINGCHANGE:case WM_THEMECHANGED:{
- if(video){RECT r;updateGlass(w);GetClientRect(w,&r);layout(w,r.right,r.bottom);}break;}
+ if(video && themeMenu)applyTheme(w,skin);break;}
  case WM_ERASEBKGND:{
- RECT r;GetClientRect(w,&r);FillRect((HDC)wp,&r,GetSysColorBrush(COLOR_BTNFACE));
- if(glass){r.bottom=scale(12);FillRect((HDC)wp,&r,GetStockObject(BLACK_BRUSH));}return 1;}
+ RECT r;GetClientRect(w,&r);HDC dc=(HDC)wp;Theme t=themes[skin];
+ if(contrastMode)FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
+ else if(glass)FillRect(dc,&r,GetStockObject(BLACK_BRUSH));
+ else if(skin==SEVEN){RECT bottom=r;bottom.top=r.bottom-scale(100);blend(dc,bottom,t.highlight,t.panel);r.bottom=scale(12);blend(dc,r,t.highlight,t.panel);}
+ else{fillColor(dc,r,color(t.panel));if(skin==XP){r.bottom=scale(12);blend(dc,r,0x4489fa,t.accent);}}
+ return 1;}
+ case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
+ case WM_CTLCOLORSTATIC:if((HWND)lp!=video && (HWND)lp!=idleLogo && panelBrush && !contrastMode){
+ SetBkColor((HDC)wp,color(themes[skin].panel));SetTextColor((HDC)wp,color(themes[skin].text));return (LRESULT)panelBrush;}break;
  case WM_INITMENUPOPUP:{HMENU m=(HMENU)wp;if(m!=queue&&m!=audio&&m!=subs)break;while(GetMenuItemCount(m)>0)DeleteMenu(m,0,MF_BYPOSITION);
  if(m==queue){for(size_t i=0;i<ap_count(player);i++)track(m,(int)i,basename8(ap_item(player,i)),i==(size_t)ap_index(player));}else ap_tracks(player,m==subs,m,track);return 0;}
  case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else ap_select(player,m==subs,(int)item.dwItemData);return 0;}
- case WM_COMMAND:switch(LOWORD(wp)){case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:start(ap_index(player)+1);break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
+ case WM_COMMAND:
+ if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;applyTheme(w,value);storeTheme(value);return 0;}
+ if(LOWORD(wp)==THEME_BUTTON){RECT r;GetWindowRect(GetDlgItem(w,THEME_BUTTON),&r);TrackPopupMenu(themeMenu,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);return 0;}
+ switch(LOWORD(wp)){case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:start(ap_index(player)+1);break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
  case WM_HSCROLL:if((HWND)lp==level)ap_volume(player,SendMessageW(level,TBM_GETPOS,0,0));else if((HWND)lp==position){dragging=LOWORD(wp)==TB_THUMBTRACK;if(!dragging)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
  case WM_TIMER:
  tick();
@@ -140,7 +166,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:KillTimer(w,1);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }

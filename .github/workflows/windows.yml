@@ -37,6 +37,9 @@ jobs:
           if (!$p.WaitForExit(40000)) { $p.Kill(); throw 'Playback test timed out' }
           if ($p.ExitCode -ne 0) { throw "Playback test failed ($($p.ExitCode))" }
           7z a -tzip RMP-Windows-x64.zip ./build/RMP
+      - name: Switch all themes and verify preference restoration
+        shell: pwsh
+        run: ./windows/test-themes.ps1 ./build/RMP/RMP.exe (Resolve-Path fixture.wav)
       - name: Compare launch timings with Windows v1
         shell: pwsh
         run: |
@@ -96,4 +99,4 @@ jobs:
       - name: Publish Windows release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" RMP-Windows-x64.zip RMP-Setup-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "RMP 1.1.2 for Windows" --notes "Run RMP-Setup-x64.exe or extract the portable ZIP. Targets Windows 7 SP1 x64 and newer. Aero Glass follows the desktop theme. Build, playback and installer tested on Windows Server 2022. Windows 7 desktop verification pending."
+        run: gh release create "$GITHUB_REF_NAME" RMP-Windows-x64.zip RMP-Setup-x64.exe --repo "$GITHUB_REPOSITORY" --verify-tag --title "RMP for Windows · $GITHUB_REF_NAME" --notes "Run RMP-Setup-x64.exe or extract the portable ZIP. Targets Windows 7 SP1 x64 and newer. Aero Glass follows the desktop theme. Build, playback and installer tested on Windows Server 2022. Windows 7 desktop verification pending."

@@ -19,8 +19,14 @@ Tested locally with H.264 video and AAC audio in MKV, embedded SRT subtitles, FL
 
 ## Windows x64
 
-Windows 1.1 targets Windows 7 SP1 x64 and newer. Run RMP-Setup-x64.exe for a per-user installation with a Start menu shortcut and an entry in Programs and Features. For portable use, extract the entire Windows release ZIP to one folder and run RMP.exe. Use Open for a file, File → Open network stream for a URL, or drag files onto the window. Queue, Audio track and Subtitles are in the menu bar. F11 toggles fullscreen. The executable uses the same Rust playback core and a native Win32 interface.
+The Windows build targets Windows 7 SP1 x64 and newer. Run RMP-Setup-x64.exe for a per-user installation with a Start menu shortcut and an entry in Programs and Features. For portable use, extract the entire Windows release ZIP to one folder and run RMP.exe. Use Open for a file, File → Open network stream for a URL, or drag files onto the window. Queue, Audio track and Subtitles are in the menu bar. F11 toggles fullscreen. The executable uses the same Rust playback core and a native Win32 interface.
 
 GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, and exercises WAV playback on a Windows runner. A successful Windows release tag publishes the ZIP. See [.github/workflows/windows.yml](.github/workflows/windows.yml) for the toolchain and packaging steps.
 
 The Windows interface uses Segoe UI and themed Win32 controls. On a Windows 7 Aero desktop, the frame extends into the player above the video. A solid frame is used when composition is unavailable or High Contrast is active. GitHub Actions tests portable playback, installation, installed playback, and uninstallation on Windows Server 2022. Visual and runtime testing on Windows 7 SP1 is pending.
+
+## Themes in RMP 2.0
+
+Open **Theme ▾** in the player or **Theme** in the menu bar. Windows 10/11 uses flat light surfaces, Windows 7 uses a blue glass finish, Windows XP uses a blue frame accent and cream beveled buttons, and Mac uses a dark charcoal panel and rounded controls. The same four choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
+
+The Windows 7 theme extends genuine DWM glass into the top strip and bottom playback bar on a Windows 7 desktop with composition enabled. Other hosts render a blue gradient for that theme. Window management buttons and system dialogs follow the host OS.

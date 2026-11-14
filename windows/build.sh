@@ -10,7 +10,7 @@ rc=${WINDRES:-x86_64-w64-mingw32-windres}
 "$rc" -I . windows/rmp.rc -O coff -o "$out/icon.o"
 "$cc" -Wall -O2 -municode -mwindows -static windows/player.c "$out/icon.o" \
  "${CARGO_TARGET_DIR:-target}/x86_64-win7-windows-gnu/release/librmp.a" "$runtime/sdk/lib/libvlc.lib" \
- -ldwmapi -lcomctl32 -lcomdlg32 -lshell32 -luserenv -lws2_32 -lntdll -lbcrypt -o "$out/RMP.exe"
+ -lmsimg32 -ladvapi32 -ldwmapi -lcomctl32 -lcomdlg32 -lshell32 -luserenv -lws2_32 -lntdll -lbcrypt -o "$out/RMP.exe"
 rm "$out/icon.o"
 cp "$runtime"/*.dll "$out/"
 cp -R "$runtime/plugins" "$runtime/lua" notices "$out/"

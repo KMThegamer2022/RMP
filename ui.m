@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 #include <stdbool.h>
+#import "mac-theme.h"
 typedef struct Player Player;
 extern Player *ap_create(void *);
 extern void ap_destroy(Player *),ap_add(Player *,const char *,bool),ap_toggle(Player *),ap_seek(Player *,int64_t),ap_volume(Player *,int);
@@ -18,7 +19,8 @@ extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool)
  NSTextField *name,*status,*clockLabel,*welcome;
  NSSlider *seek,*volume;
  NSButton *play;
- NSMenu *queue,*audio,*subs;
+ NSMenu *queue,*audio,*subs,*themeMenu;
+ NSInteger skin;
  NSMutableArray<NSURL *> *pending;
  NSTimer *timer;
  int previous;
@@ -61,10 +63,36 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [self item:media title:@"Next Item" action:@selector(next:) key:@"]"];
  [self item:media title:@"Toggle Full Screen" action:@selector(full:) key:@"f"].keyEquivalentModifierMask=NSEventModifierFlagControl|NSEventModifierFlagCommand;
  queue=[self menu:@"Queue" parent:bar];audio=[self menu:@"Audio Track" parent:bar];subs=[self menu:@"Subtitles" parent:bar];
+ themeMenu=[self menu:@"Theme" parent:bar];
+ for(NSString *title in @[@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"]){
+ NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];entry.tag=themeMenu.numberOfItems-1;
+ }
  queue.delegate=self;audio.delegate=self;subs.delegate=self;
 }
 -(NSButton *)button:(NSString *)title action:(SEL)action{
- return [NSButton buttonWithTitle:title target:self action:action];
+ TransportButton *b=[TransportButton buttonWithTitle:title target:self action:action];b.bordered=NO;return b;
+}
+-(void)styleView:(NSView *)v {
+ Theme t=themes[skin];
+ if([v isKindOfClass:TransportButton.class]){
+ TransportButton *b=(TransportButton *)v;b.skin=skin;b.font=[NSFont systemFontOfSize:13 weight:skin==MODERN?NSFontWeightMedium:NSFontWeightRegular];[b setNeedsDisplay:YES];
+ }else if([v isKindOfClass:NSTextField.class] && v!=welcome){((NSTextField *)v).textColor=rgb(t.text);}
+ if(v!=screen)for(NSView *child in v.subviews)[self styleView:child];
+}
+-(void)applyTheme:(NSInteger)value {
+ skin=value>=0 && value<THEME_COUNT?value:MAC;
+ ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
+ window.appearance=[NSAppearance appearanceNamed:skin==MAC?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
+ window.titlebarAppearsTransparent=YES;
+ window.backgroundColor=rgb(skin==XP?0x3978db:themes[skin].panel);
+ [self styleView:surface];
+ for(NSMenuItem *entry in themeMenu.itemArray)entry.state=entry.tag==skin?NSControlStateValueOn:NSControlStateValueOff;
+}
+-(void)pickTheme:(NSMenuItem *)entry {
+ [self applyTheme:entry.tag];[NSUserDefaults.standardUserDefaults setInteger:skin forKey:@"PlayerTheme"];
+}
+-(void)showThemes:(NSButton *)sender{
+ [themeMenu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,NSHeight(sender.bounds)) inView:sender];
 }
 -(NSStackView *)row:(NSArray *)views{
  NSStackView *r=[NSStackView stackViewWithViews:views];r.spacing=10;r.orientation=NSUserInterfaceLayoutOrientationHorizontal;return r;
@@ -74,7 +102,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,900,570) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
  window.title=@"RMP";window.minSize=NSMakeSize(720,380);window.delegate=self;
  window.collectionBehavior=NSWindowCollectionBehaviorFullScreenPrimary;[window center];
- NSView *root=window.contentView;root.wantsLayer=YES;
+ window.contentView=[[ThemeSurface alloc]initWithFrame:window.contentView.bounds];NSView *root=window.contentView;root.wantsLayer=YES;
  screen=[NSView new];screen.wantsLayer=YES;screen.layer.backgroundColor=NSColor.blackColor.CGColor;
  welcome=label(@"RMP",42,YES);welcome.textColor=[NSColor colorWithWhite:0.65 alpha:1];
  [screen addSubview:welcome];welcome.translatesAutoresizingMaskIntoConstraints=NO;
@@ -83,7 +111,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  name=label(@"RMP",18,YES);status=label(@"Ready",12,NO);
  [name setContentCompressionResistancePriority:200 forOrientation:NSLayoutConstraintOrientationHorizontal];
  NSView *space=[NSView new];
- NSStackView *top=[self row:@[name,space,status,[self button:@"Open Files…" action:@selector(open:)]]];
+ NSStackView *top=[self row:@[name,space,status,[self button:@"Theme ▾" action:@selector(showThemes:)],[self button:@"Open Files…" action:@selector(open:)]]];
  play=[self button:@"Play" action:@selector(toggle:)];
  volume=[NSSlider sliderWithValue:80 minValue:0 maxValue:100 target:self action:@selector(changeVolume:)];volume.toolTip=@"Volume";
  [volume.widthAnchor constraintEqualToConstant:85].active=YES;
@@ -101,6 +129,8 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [timeline.topAnchor constraintEqualToAnchor:screen.bottomAnchor constant:10].active=YES;
  [bottom.topAnchor constraintEqualToAnchor:timeline.bottomAnchor constant:6].active=YES;
  [bottom.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12].active=YES;
+ [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(MAC)}];
+ [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
  p=ap_create((__bridge void *)screen);
  if(!p){NSAlert *a=[NSAlert new];a.messageText=@"RMP could not load its playback engine.";[a runModal];[NSApp terminate:nil];return;}
  [window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];

@@ -1,0 +1,9 @@
+/* Colors are sRGB, encoded as 0xRRGGBB. Keep the preference IDs stable. */
+enum { MODERN, SEVEN, XP, MAC, THEME_COUNT };
+typedef struct { unsigned panel, edge, face, highlight, text, accent; int radius; } Theme;
+static const Theme themes[] = {
+ {0xf3f4f6,0xbac0c8,0xffffff,0xffffff,0x17202a,0x0067b8,4},
+ {0xb8d7ef,0x6489a8,0xc4def1,0xf4fbff,0x132d48,0x2673b5,6},
+ {0xece9d8,0x736e57,0xe6e3d3,0xfffef7,0x171710,0x245edb,3},
+ {0x303034,0x696970,0x525257,0x525257,0xffffff,0x286bd1,10}
+};
