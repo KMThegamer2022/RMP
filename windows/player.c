@@ -60,6 +60,22 @@ extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const cha
 static wchar_t *wide(const char *);
 static void start(size_t),showCurrentTrack(void),layout(HWND,int,int);
 #include "media-library.h"
+/* Older Windows versions route wheel input to the focus owner. Follow the
+   pointer over the volume control even when a child such as the queue has focus. */
+static bool routeWheel(HWND target,WPARAM direction,LPARAM location){
+ if(!level||!IsWindowEnabled(mainwin))return false;
+ HWND root=GetAncestor(target,GA_ROOT);
+ if(root!=mainwin&&root!=transport)return false;
+ POINT point={(short)LOWORD(location),(short)HIWORD(location)};
+ HWND hit=WindowFromPoint(point);
+ if(hit==level && target!=level){
+  SendMessageW(level,WM_MOUSEWHEEL,direction,location);return true;
+ }
+ if(target==level && hit==mediaRows){
+  SendMessageW(mediaRows,WM_MOUSEWHEEL,direction,location);return true;
+ }
+ return false;
+}
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
@@ -224,6 +240,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  makeMediaBrowser();
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
+ case WM_MOUSEWHEEL:if(routeWheel(w,wp,lp))return 0;break;
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
  case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
  case WM_DWMCOMPOSITIONCHANGED:case WM_SETTINGCHANGE:case WM_THEMECHANGED:{
@@ -320,5 +337,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
 
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
- ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
+ ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){
+ if(m.message==WM_MOUSEWHEEL && routeWheel(m.hwnd,m.wParam,m.lParam))continue;
+ if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
 }
