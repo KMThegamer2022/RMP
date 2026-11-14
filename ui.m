@@ -1,0 +1,175 @@
+#import <Cocoa/Cocoa.h>
+#include <stdbool.h>
+typedef struct Player Player;
+extern Player *ap_create(void *);
+extern void ap_destroy(Player *),ap_add(Player *,const char *,bool),ap_toggle(Player *),ap_seek(Player *,int64_t),ap_volume(Player *,int);
+extern bool ap_play(Player *,size_t),ap_seekable(Player *),ap_select(Player *,bool,int);
+extern long ap_index(Player *);
+extern size_t ap_count(Player *);
+extern const char *ap_item(Player *,size_t);
+extern int ap_state(Player *);
+extern int64_t ap_time(Player *),ap_length(Player *);
+extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool));
+
+@interface PlayerApp : NSObject<NSApplicationDelegate,NSMenuDelegate,NSWindowDelegate>{
+ Player *p;
+ NSWindow *window;
+ NSView *screen;
+ NSTextField *name,*status,*clockLabel,*welcome;
+ NSSlider *seek,*volume;
+ NSButton *play;
+ NSMenu *queue,*audio,*subs;
+ NSMutableArray<NSURL *> *pending;
+ NSTimer *timer;
+ int previous;
+}
+@end
+
+static NSString *stamp(int64_t ms){
+ long s=MAX(0,ms)/1000;
+ return s>=3600?[NSString stringWithFormat:@"%ld:%02ld:%02ld",s/3600,s/60%60,s%60]:[NSString stringWithFormat:@"%ld:%02ld",s/60,s%60];
+}
+static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
+ NSTextField *f=[NSTextField labelWithString:text];
+ f.font=bold?[NSFont boldSystemFontOfSize:size]:[NSFont systemFontOfSize:size];
+ f.lineBreakMode=NSLineBreakByTruncatingMiddle;
+ return f;
+}
+@implementation PlayerApp
+-(NSMenuItem *)item:(NSMenu *)m title:(NSString *)t action:(SEL)a key:(NSString *)key{
+ NSMenuItem *i=[m addItemWithTitle:t action:a keyEquivalent:key];i.target=self;return i;
+}
+-(NSMenu *)menu:(NSString *)title parent:(NSMenu *)parent{
+ NSMenuItem *item=[parent addItemWithTitle:title action:nil keyEquivalent:@""];
+ NSMenu *m=[[NSMenu alloc]initWithTitle:title];item.submenu=m;return m;
+}
+-(void)menus{
+ NSMenu *bar=[NSMenu new];NSApp.mainMenu=bar;
+ NSMenu *app=[self menu:@"RMP" parent:bar];
+ [app addItemWithTitle:@"Quit RMP" action:@selector(terminate:) keyEquivalent:@"q"];
+ NSMenu *file=[self menu:@"File" parent:bar];
+ [self item:file title:@"Open Files…" action:@selector(open:) key:@"o"];
+ [self item:file title:@"Open Network Stream…" action:@selector(stream:) key:@"u"];
+ NSMenu *edit=[self menu:@"Edit" parent:bar];
+ for(NSString *s in @[@"Cut",@"Copy",@"Paste",@"Select All"]){
+ NSArray *keys=@[@"x",@"c",@"v",@"a"]; NSUInteger n=edit.numberOfItems;
+ [edit addItemWithTitle:s action:NSSelectorFromString(@[@"cut:",@"copy:",@"paste:",@"selectAll:"][n]) keyEquivalent:keys[n]];
+ }
+ NSMenu *media=[self menu:@"Playback" parent:bar];
+ [self item:media title:@"Play / Pause" action:@selector(toggle:) key:@" "].keyEquivalentModifierMask=0;
+ [self item:media title:@"Previous Item" action:@selector(prev:) key:@"["];
+ [self item:media title:@"Next Item" action:@selector(next:) key:@"]"];
+ [self item:media title:@"Toggle Full Screen" action:@selector(full:) key:@"f"].keyEquivalentModifierMask=NSEventModifierFlagControl|NSEventModifierFlagCommand;
+ queue=[self menu:@"Queue" parent:bar];audio=[self menu:@"Audio Track" parent:bar];subs=[self menu:@"Subtitles" parent:bar];
+ queue.delegate=self;audio.delegate=self;subs.delegate=self;
+}
+-(NSButton *)button:(NSString *)title action:(SEL)action{
+ return [NSButton buttonWithTitle:title target:self action:action];
+}
+-(NSStackView *)row:(NSArray *)views{
+ NSStackView *r=[NSStackView stackViewWithViews:views];r.spacing=10;r.orientation=NSUserInterfaceLayoutOrientationHorizontal;return r;
+}
+-(void)applicationDidFinishLaunching:(NSNotification *)note{
+ [self menus];NSApp.appearance=[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+ window=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,900,570) styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable|NSWindowStyleMaskResizable|NSWindowStyleMaskMiniaturizable backing:NSBackingStoreBuffered defer:NO];
+ window.title=@"RMP";window.minSize=NSMakeSize(720,380);window.delegate=self;
+ window.collectionBehavior=NSWindowCollectionBehaviorFullScreenPrimary;[window center];
+ NSView *root=window.contentView;root.wantsLayer=YES;
+ screen=[NSView new];screen.wantsLayer=YES;screen.layer.backgroundColor=NSColor.blackColor.CGColor;
+ welcome=label(@"RMP",42,YES);welcome.textColor=[NSColor colorWithWhite:0.65 alpha:1];
+ [screen addSubview:welcome];welcome.translatesAutoresizingMaskIntoConstraints=NO;
+ [welcome.centerXAnchor constraintEqualToAnchor:screen.centerXAnchor].active=YES;
+ [welcome.centerYAnchor constraintEqualToAnchor:screen.centerYAnchor].active=YES;
+ name=label(@"RMP",18,YES);status=label(@"Ready",12,NO);
+ [name setContentCompressionResistancePriority:200 forOrientation:NSLayoutConstraintOrientationHorizontal];
+ NSView *space=[NSView new];
+ NSStackView *top=[self row:@[name,space,status,[self button:@"Open Files…" action:@selector(open:)]]];
+ play=[self button:@"Play" action:@selector(toggle:)];
+ volume=[NSSlider sliderWithValue:80 minValue:0 maxValue:100 target:self action:@selector(changeVolume:)];volume.toolTip=@"Volume";
+ [volume.widthAnchor constraintEqualToConstant:85].active=YES;
+ seek=[NSSlider sliderWithValue:0 minValue:0 maxValue:1 target:self action:@selector(scrub:)];seek.continuous=NO;seek.toolTip=@"Playback position";
+ clockLabel=label(@"0:00 / 0:00",12,NO);clockLabel.font=[NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightRegular];
+ NSStackView *timeline=[self row:@[seek,clockLabel]];
+ NSStackView *bottom=[self row:@[[self button:@"Previous" action:@selector(prev:)],play,[self button:@"Next" action:@selector(next:)],[NSView new],label(@"Volume",12,NO),volume,[self button:@"Full Screen" action:@selector(full:)]]];
+ for(NSView *v in @[top,screen,timeline,bottom]){
+ [root addSubview:v];v.translatesAutoresizingMaskIntoConstraints=NO;
+ CGFloat inset=v==screen?0:16;
+ [v.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:inset].active=YES;[v.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-inset].active=YES;
+ }
+ [top.topAnchor constraintEqualToAnchor:root.topAnchor constant:10].active=YES;
+ [screen.topAnchor constraintEqualToAnchor:top.bottomAnchor constant:10].active=YES;
+ [timeline.topAnchor constraintEqualToAnchor:screen.bottomAnchor constant:10].active=YES;
+ [bottom.topAnchor constraintEqualToAnchor:timeline.bottomAnchor constant:6].active=YES;
+ [bottom.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12].active=YES;
+ p=ap_create((__bridge void *)screen);
+ if(!p){NSAlert *a=[NSAlert new];a.messageText=@"RMP could not load its playback engine.";[a runModal];[NSApp terminate:nil];return;}
+ [window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
+ timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
+ if(pending.count){[self accept:pending];pending=nil;}
+ [self refresh:nil];
+}
+-(void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls{
+ if(p)[self accept:urls];else{if(!pending)pending=[NSMutableArray new];[pending addObjectsFromArray:urls];}
+}
+-(void)accept:(NSArray<NSURL *> *)urls{
+ size_t start=ap_count(p);
+ for(NSURL *u in urls)ap_add(p,u.isFileURL?u.fileSystemRepresentation:u.absoluteString.UTF8String,!u.isFileURL);
+ if(urls.count)[self launch:start];
+}
+-(NSString *)display:(size_t)i{
+ NSString *s=[NSString stringWithUTF8String:ap_item(p,i)];
+ return s.lastPathComponent.length?s.lastPathComponent:s;
+}
+-(void)launch:(size_t)i{
+ if(i>=ap_count(p))return;
+ previous=-1;welcome.hidden=YES;
+ name.stringValue=[self display:i];window.title=[@"RMP — " stringByAppendingString:name.stringValue];
+ status.stringValue=ap_play(p,i)?@"Opening…":@"Could not open media";
+}
+-(void)refresh:(id)sender{
+ int state=ap_state(p);
+ if(state==6 && previous!=6 && ap_index(p)+1<(long)ap_count(p)){[self next:nil];return;}
+ previous=state;
+ NSArray *states=@[@"Ready",@"Opening…",@"Buffering…",@"Playing",@"Paused",@"Stopped",@"Finished",@"Playback error"];
+ status.stringValue=states[MAX(0,MIN(7,state))];play.title=state>=1&&state<=3?@"Pause":@"Play";
+ int64_t t=ap_time(p),d=ap_length(p);seek.enabled=ap_seekable(p)&&d>0;
+ seek.doubleValue=d>0?(double)t/d:0;clockLabel.stringValue=[NSString stringWithFormat:@"%@ / %@",stamp(t),d>0?stamp(d):@"—"];
+}
+-(void)open:(id)s{
+ NSOpenPanel *panel=[NSOpenPanel openPanel];panel.allowsMultipleSelection=YES;
+ if([panel runModal]==NSModalResponseOK)[self accept:panel.URLs];
+}
+-(void)stream:(id)s{
+ NSAlert *a=[NSAlert new];a.messageText=@"Open Network Stream";[a addButtonWithTitle:@"Open"];[a addButtonWithTitle:@"Cancel"];
+ NSTextField *f=[[NSTextField alloc]initWithFrame:NSMakeRect(0,0,400,24)];f.placeholderString=@"https://";a.accessoryView=f;a.window.initialFirstResponder=f;
+ if([a runModal]!=NSAlertFirstButtonReturn)return;
+ NSURL *url=[NSURL URLWithString:[f.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+ if(url.scheme.length && !url.isFileURL){[self accept:@[url]];return;}
+ NSAlert *err=[NSAlert new];err.messageText=@"Enter a stream URL including its protocol.";[err runModal];
+}
+-(void)prev:(id)s{if(ap_index(p)>0)[self launch:ap_index(p)-1];else if(ap_count(p))[self launch:0];}
+-(void)next:(id)s{[self launch:ap_index(p)+1];}
+-(void)toggle:(id)s{if(!ap_count(p))[self open:s];else ap_toggle(p);}
+-(void)full:(id)s{[window toggleFullScreen:nil];}
+-(void)scrub:(id)s{ap_seek(p,seek.doubleValue*ap_length(p));}
+-(void)changeVolume:(id)s{ap_volume(p,volume.intValue);}
+-(void)choose:(NSMenuItem *)i{if(i.menu==queue)[self launch:i.tag];else if(!ap_select(p,i.menu==subs,(int)i.tag))NSBeep();}
+static void addTrack(void *context,int idNum,const char *title,bool active){
+ NSMenu *m=(__bridge NSMenu *)context; NSMenuItem *i=[m addItemWithTitle:[NSString stringWithUTF8String:title]?:@"Track" action:@selector(choose:) keyEquivalent:@""];
+ i.target=m.delegate;i.tag=idNum;i.state=active?NSControlStateValueOn:NSControlStateValueOff;
+}
+-(void)menuNeedsUpdate:(NSMenu *)m{
+ [m removeAllItems];if(!p)return;
+ if(m==queue){for(size_t n=0;n<ap_count(p);n++)addTrack((__bridge void *)m,(int)n,[self display:n].UTF8String,(long)n==ap_index(p));}
+ else ap_tracks(p,m==subs,(__bridge void *)m,addTrack);
+ if(!m.numberOfItems)[m addItemWithTitle:m==queue?@"Queue is empty":@"No tracks available" action:nil keyEquivalent:@""];
+}
+-(BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)a{return YES;}
+-(void)applicationWillTerminate:(NSNotification *)n{[timer invalidate];if(p)ap_destroy(p);}
+@end
+int main(void){@autoreleasepool{
+ NSString *plugins=[NSBundle.mainBundle.executablePath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"plugins"];
+ setenv("VLC_PLUGIN_PATH",plugins.fileSystemRepresentation,1);
+ NSApplication *app=NSApplication.sharedApplication;[app setActivationPolicy:NSApplicationActivationPolicyRegular];
+ __attribute__((objc_precise_lifetime)) PlayerApp *delegate=[PlayerApp new];app.delegate=delegate;[app run];(void)delegate;
+}return 0;}
