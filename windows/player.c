@@ -4,6 +4,8 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <dwmapi.h>
+#include <uxtheme.h>
+#include <vssym32.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -43,6 +45,7 @@ static int scale(int value){
 #include "theme.h"
 #include "backdrop.h"
 #include "fullscreen.h"
+#include "glass-controls.h"
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
@@ -88,8 +91,8 @@ static void applyTheme(HWND w,int value){
  DwmSetWindowAttribute(w,33,&corners,sizeof(corners));
  HFONT nextFont=CreateFontW(-scale(skin==XP?13:14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,skin==XP?L"Tahoma":L"Segoe UI");
  if(nextFont){HFONT old=uiFont;uiFont=nextFont;
- for(HWND child=GetWindow(w,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,(WPARAM)uiFont,FALSE);
- DeleteObject(old);}
+ for(HWND child=GetWindow(host,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,(WPARAM)uiFont,FALSE);
+ if(old)DeleteObject(old);}
 
  RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
  RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_ERASE|RDW_ALLCHILDREN);
@@ -132,7 +135,9 @@ static LRESULT CALLBACK videoProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR i
  if(msg==WM_PAINT){PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);FillRect(dc,&ps.rcPaint,GetStockObject(BLACK_BRUSH));EndPaint(h,&ps);return 0;}
  return DefSubclassProc(h,msg,wp,lp);}
 static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD style){
- HWND h=CreateWindowW(cls,title,WS_CHILD|WS_VISIBLE|style,0,0,10,10,w,(HMENU)(intptr_t)id,GetModuleHandleW(NULL),NULL);SendMessageW(h,WM_SETFONT,(WPARAM)uiFont,TRUE);return h;
+ HWND h=CreateWindowW(cls,title,WS_CHILD|WS_VISIBLE|style,0,0,10,10,w,(HMENU)(intptr_t)id,GetModuleHandleW(NULL),NULL);SendMessageW(h,WM_SETFONT,(WPARAM)uiFont,TRUE);
+ if(w==mainwin && !(style&WS_CLIPCHILDREN))SetWindowSubclass(h,glassControlProc,2,0);
+ return h;
 }
 static void nextItem(void){size_t n=ap_count(player);size_t i=ap_index(player)+1;if(shuffle&&n>1)i=(i+(size_t)(GetTickCount64()%(n-1)))%n;start(i);}
 static void tick(void){
@@ -259,10 +264,10 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 }
 
 int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
- SetProcessDPIAware();INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
+ BufferedPaintInit();SetProcessDPIAware();INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
  WNDCLASSW c={0};c.lpfnWndProc=windowproc;c.hInstance=h;c.lpszClassName=L"RMPPlayer";c.hIcon=LoadIconW(h,MAKEINTRESOURCEW(1));c.hCursor=LoadCursor(NULL,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&c);
  WNDCLASSW floating={0};floating.lpfnWndProc=transportProc;floating.hInstance=h;floating.lpszClassName=L"RMPTransport";floating.hCursor=c.hCursor;RegisterClassW(&floating);
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
- ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}return (int)m.wParam;
+ ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
 }

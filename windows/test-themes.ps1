@@ -5,6 +5,7 @@ Add-Type -ReferencedAssemblies System.Drawing.Primitives @'
 using System;
 using System.Runtime.InteropServices;
 public class ThemeTest {
+ [DllImport("user32")] public static extern IntPtr GetDlgItem(IntPtr w,int id);
  [DllImport("user32",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
  [DllImport("user32")] public static extern bool IsWindowVisible(IntPtr w);
  [DllImport("user32")] public static extern bool SetCursorPos(int x,int y);
@@ -48,10 +49,14 @@ try {
   }
   if ((Get-ItemPropertyValue 'HKCU:\Software\RMP' Theme) -ne ($id-310)){throw 'Preference was not saved'}
  }
+ $button=[ThemeTest]::GetDlgItem($w,102)
+ $oldFont=[ThemeTest]::SendMessage($button,49,[IntPtr]::Zero,[IntPtr]::Zero)
  [void][ThemeTest]::SetCursorPos(10,10)
  [void][ThemeTest]::SendMessage($w,273,[IntPtr]105,[IntPtr]::Zero)
  $deck=[ThemeTest]::FindWindow('RMPTransport','Playback controls')
  if(!$deck.ToInt64() -or ![ThemeTest]::IsWindowVisible($deck)){throw 'Fullscreen controller did not appear'}
+ $font=[ThemeTest]::SendMessage($button,49,[IntPtr]::Zero,[IntPtr]::Zero)
+ if($font -eq [IntPtr]::Zero -or $font -eq $oldFont){throw "Fullscreen control retained a discarded font"}
  Start-Sleep -Seconds 4
  if([ThemeTest]::IsWindowVisible($deck)){throw 'Fullscreen controller did not hide'}
  [void][ThemeTest]::SetCursorPos(55,55);Start-Sleep -Milliseconds 500
