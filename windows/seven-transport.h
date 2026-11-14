@@ -13,7 +13,7 @@ static void paintSevenFace(DRAWITEMSTRUCT *d){
   HMODULE module=GetModuleHandleW(NULL);
   HRSRC res=FindResourceW(module,MAKEINTRESOURCEW(410+index),MAKEINTRESOURCEW(10));
   if(res)sevenIcons[index]=CreateIconFromResourceEx(LockResource(LoadResource(module,res)),SizeofResource(module,res),
-     TRUE,0x00030000,width,height,0);
+     TRUE,0x00030000,0,0,0);
  }
  if(!sevenIcons[index]){paintButton(d);return;}
  FillRect(d->hDC,&r,glass?GetStockObject(BLACK_BRUSH):panelBrush);

@@ -1,4 +1,4 @@
-enum { STANDARD_TRANSPORT_HEIGHT = 100 };
+enum { STANDARD_TRANSPORT_HEIGHT = 100, MEDIA_TRANSPORT_HEIGHT = 79 };
 
 static void updateGlass(HWND window){
  HIGHCONTRASTW contrast={sizeof(contrast)};
@@ -7,7 +7,7 @@ static void updateGlass(HWND window){
  BOOL composed=FALSE;
  DwmIsCompositionEnabled(&composed);
  bool extend=skin==SEVEN && !fullscreen && composed && !contrastMode;
- MARGINS margins={0,0,0,extend?scale(STANDARD_TRANSPORT_HEIGHT):0};
+ MARGINS margins={0,0,0,extend?scale(MEDIA_TRANSPORT_HEIGHT):0};
  HRESULT result=DwmExtendFrameIntoClientArea(window,&margins);
  glass=extend && SUCCEEDED(result);
  InvalidateRect(window,NULL,TRUE);

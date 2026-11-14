@@ -48,34 +48,46 @@ static int scale(int value){
 #include "fullscreen.h"
 #include "glass-controls.h"
 #include "seven-transport.h"
+extern size_t ap_library_count(Player *);
+extern const char *ap_library_item(Player *,size_t);
+extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const char *),ap_playlist_load(Player *,const char *);
+static wchar_t *wide(const char *);
+static void start(size_t),showCurrentTrack(void),layout(HWND,int,int);
+#include "media-library.h"
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
- int height=scale(classic?68:STANDARD_TRANSPORT_HEIGHT), deck=y-height;
+ int height=scale(classic?68:mediaTheme()?MEDIA_TRANSPORT_HEIGHT:STANDARD_TRANSPORT_HEIGHT), deck=y-height;
  MoveWindow(video,frame,top,x-2*frame,max(1,(fullscreen?y:deck)-top),TRUE);
  int logo=scale(classic?120:96);
  MoveWindow(idleLogo,(x-logo)/2,((fullscreen?y:deck)-top-logo)/2,logo,logo,TRUE);
+ if(mediaRows){
+  layoutMediaBrowser(x,deck);
+  if(fullscreen||!mediaTheme())ShowWindow(video,SW_SHOWNA);
+ }
  HWND host=fullscreen?transport:w;
  if(fullscreen){int width=min(x-scale(20),scale(740));POINT origin={(x-width)/2,y-height-scale(24)};ClientToScreen(w,&origin);
  SetWindowPos(host,HWND_TOP,origin.x,origin.y,width,height,SWP_NOACTIVATE);x=width;y=height;deck=0;}
- int cy=y-scale(classic?34:48),mid=x/2;
+ if(mediaTheme()){layoutClassicTransport(host,x,deck);return;}
+ int cy=y-scale(classic?34:48);
  MoveWindow(position,scale(10),deck+scale(3),x-scale(142),scale(24),TRUE);
  MoveWindow(clocktext,x-scale(129),deck+scale(2),scale(125),scale(24),TRUE);
  int ids[]={PLAY,PREV,STOP,NEXT,FULL,LIST,REPEAT,SHUFFLE,OPEN};
  int left=scale(8);
  for(unsigned i=0;i<sizeof(ids)/sizeof(ids[0]);i++){
  HWND b=GetDlgItem(host,ids[i]);bool extra=ids[i]==LIST||ids[i]==REPEAT||ids[i]==SHUFFLE;
- bool show=skin==SEVEN?ids[i]!=OPEN:classic?(ids[i]!=OPEN):!extra;
+ bool show=classic?(ids[i]!=OPEN):!extra;
  ShowWindow(b,show?SW_SHOWNA:SW_HIDE);if(!show)continue;
  int width=scale(classic?(i==0?40:32):(i==2?48:i==4?64:76));
- if(skin==SEVEN)width=scale(sevenWidths[i]);
- MoveWindow(b,left,cy,width,scale(skin==SEVEN?30:classic?29:36),TRUE);left+=width+scale(classic?2:4);
+ MoveWindow(b,left,cy,width,scale(classic?29:36),TRUE);left+=width+scale(classic?2:4);
  }
  MoveWindow(volumeLabel,x-scale(155),cy,scale(48),scale(29),TRUE);MoveWindow(level,x-scale(103),cy+scale(2),scale(96),scale(24),TRUE);
 
 }
 static void applyTheme(HWND w,int value){
+ bool changing=value!=skin;
  skin=value;
+ if(changing&&mediaTheme())browserPage=skin==XP?NAV_NOW:NAV_LIBRARY;
  if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(themes[skin].panel));
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
@@ -95,9 +107,12 @@ static void applyTheme(HWND w,int value){
  HFONT nextFont=CreateFontW(-scale(skin==XP?13:14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,skin==XP?L"Tahoma":L"Segoe UI");
  if(nextFont){HFONT old=uiFont;uiFont=nextFont;
  for(HWND child=GetWindow(host,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,(WPARAM)uiFont,FALSE);
+ if(host!=w)for(HWND child=GetWindow(w,GW_CHILD);child;child=GetWindow(child,GW_HWNDNEXT))SendMessageW(child,WM_SETFONT,(WPARAM)uiFont,FALSE);
  if(old)DeleteObject(old);}
 
+ styleMediaRows();
  RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
+ rebuildMediaRows();
  RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_FRAME|RDW_ERASE|RDW_ALLCHILDREN);
  InvalidateRect(level,NULL,TRUE);InvalidateRect(position,NULL,TRUE);
 }
@@ -113,8 +128,15 @@ static const char *basename8(const char *s){const char *p=s;for(;*s;s++)if(*s=='
 static void start(size_t index){
  if(index>=ap_count(player))return;
  if(!ap_play(player,index)){MessageBoxW(mainwin,L"Could not open this media.",L"RMP",MB_ICONERROR);return;}
+ showCurrentTrack();
+}
+static void showCurrentTrack(void){
+ intptr_t index=ap_index(player);
+ if(index<0)return;
+ if(mediaTheme()&&browserPage==NAV_NOW)rebuildMediaRows();
+ if(mediaTheme()&&browserPage!=NAV_NOW)showMediaPage(NAV_NOW);
  ShowWindow(idleLogo,SW_HIDE);
- wchar_t *title=wide(basename8(ap_item(player,index)));SetWindowTextW(mainwin,title);free(title);laststate=-1;
+ wchar_t *title=wide(basename8(ap_item(player,(size_t)index)));SetWindowTextW(mainwin,title);free(title);laststate=-1;
 }
 static void openfile(void){
  ap_prepare(player);
@@ -147,6 +169,7 @@ static HWND control(HWND w,const wchar_t *cls,const wchar_t *title,int id,DWORD 
 static void nextItem(void){size_t n=ap_count(player);size_t i=ap_index(player)+1;if(shuffle&&n>1)i=(i+(size_t)(GetTickCount64()%(n-1)))%n;start(i);}
 static void tick(void){
  updateTransport();
+ if(mediaTheme())markPlayingInQueue();
  if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);SetWindowTextW(volumeLabel,percent);}
  else SetWindowTextW(volumeLabel,L"Volume");
  int s=ap_state(player);if(s==6 && laststate!=6){if(repeatOne){start(ap_index(player));return;}if(shuffle||ap_index(player)+1<(intptr_t)ap_count(player)){nextItem();return;}}laststate=s;
@@ -185,6 +208,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  transport=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,L"RMPTransport",L"Playback controls",WS_POPUP|WS_BORDER|WS_CLIPCHILDREN,0,0,1,1,w,NULL,GetModuleHandleW(NULL),NULL);
 
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_CENTERIMAGE);
+ makeMediaBrowser();
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
@@ -194,24 +218,20 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_ERASEBKGND:{
  RECT r;GetClientRect(w,&r);HDC dc=(HDC)wp;Theme t=themes[skin];
  if(contrastMode)FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
- else if(skin==SEVEN){
- FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
- if(glass){
- /* A zero-alpha background exposes the DWM frame in this margin. */
- r.top=max(r.top,r.bottom-scale(STANDARD_TRANSPORT_HEIGHT));
- FillRect(dc,&r,GetStockObject(BLACK_BRUSH));
- }
- }
-
- else{fillColor(dc,r,color(t.panel));if(skin==XP){
- RECT frame=r;frame.bottom-=scale(100);fillColor(dc,frame,color(0x1256ce));
- r.bottom=scale(27);RECT shine=r;shine.bottom=scale(5);blend(dc,shine,0x8bb9ff,0x327df0);
- r.top=shine.bottom;blend(dc,r,0x0867ed,0x1543b2);
- SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));SelectObject(dc,uiFont);r.left=scale(9);DrawTextW(dc,L"RMP",-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER);
- }}
+ else if(mediaTheme())paintMediaSurface(dc,r);
+ else fillColor(dc,r,color(t.panel));
  return 1;}
  case WM_NOTIFY:{
  NMHDR *notice=(NMHDR *)lp;
+ if(notice->hwndFrom==mediaRows && notice->code==LVN_GETEMPTYMARKUP){
+  NMLVEMPTYMARKUP *empty=(NMLVEMPTYMARKUP*)lp;empty->dwFlags=EMF_CENTERED;
+  const WCHAR *message=GetWindowTextLengthW(mediaFilter)&&browserPage!=NAV_NOW?L"No matching tracks":
+   browserPage==NAV_LIBRARY?L"Open a media file to add it to your library.":L"Your current playlist is empty.";
+  lstrcpynW(empty->szMarkup,message,sizeof(empty->szMarkup)/sizeof(WCHAR));return TRUE;
+ }
+ if(notice->hwndFrom==mediaRows && (notice->code==NM_DBLCLK||notice->code==NM_RETURN)){
+  playMediaRow();return 0;
+ }
  if(!contrastMode && skin!=MAC && skin!=SEVEN && notice->code==NM_CUSTOMDRAW && (notice->hwndFrom==position||notice->hwndFrom==level)){
  NMCUSTOMDRAW *draw=(NMCUSTOMDRAW *)lp;
  if(draw->dwDrawStage==CDDS_PREPAINT && skin==VLC_THEME && notice->hwndFrom==level){
@@ -242,7 +262,11 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  return CDRF_SKIPDEFAULT;}
  }}
  break;}
- case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){if(skin==SEVEN && !contrastMode)paintSevenFace((DRAWITEMSTRUCT*)lp);else paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
+ case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){
+ int id=((DRAWITEMSTRUCT*)lp)->CtlID;
+ if(id>=NAV_NOW && id<=ADD_FILE)paintBrowserButton((DRAWITEMSTRUCT*)lp);
+ else if(skin==XP && !contrastMode)paintXpTransport((DRAWITEMSTRUCT*)lp);
+ else if(skin==SEVEN && !contrastMode)paintSevenFace((DRAWITEMSTRUCT*)lp);else paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
  case WM_CTLCOLORSTATIC:
  if((HWND)lp==video || (HWND)lp==idleLogo){SetBkColor((HDC)wp,RGB(0,0,0));return (LRESULT)GetStockObject(BLACK_BRUSH);}
  if(skin==SEVEN)break;
@@ -252,6 +276,12 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  if(m==queue){for(size_t i=0;i<ap_count(player);i++)track(m,(int)i,basename8(ap_item(player,i)),i==(size_t)ap_index(player));}else ap_tracks(player,m==subs,m,track);return 0;}
  case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else ap_select(player,m==subs,(int)item.dwItemData);return 0;}
  case WM_COMMAND:
+ switch(LOWORD(wp)){
+ case NAV_NOW:case NAV_LIBRARY:case NAV_QUEUE:showMediaPage(LOWORD(wp));return 0;
+ case FILTER:if(HIWORD(wp)==EN_CHANGE)rebuildMediaRows();return 0;
+ case LOAD_LIST:case SAVE_LIST:playlistFile(LOWORD(wp)==SAVE_LIST);return 0;
+ case ADD_FILE:openfile();return 0;
+ }
  if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;applyTheme(w,value);storeTheme(value);return 0;}
  switch(LOWORD(wp)){case 490:if(!launchCheck(true))MessageBoxW(w,L"The update helper could not start. Reinstall RMP to restore it.",L"RMP update",MB_ICONERROR);break;case LIST:{RECT r;GetWindowRect(GetDlgItem(fullscreen?transport:w,LIST),&r);TrackPopupMenu(queue,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);break;}
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
@@ -270,7 +300,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 }
 
 int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
- BufferedPaintInit();SetProcessDPIAware();INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
+ BufferedPaintInit();SetProcessDPIAware();INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES|ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
  WNDCLASSW c={0};c.lpfnWndProc=windowproc;c.hInstance=h;c.lpszClassName=L"RMPPlayer";c.hIcon=LoadIconW(h,MAKEINTRESOURCEW(1));c.hCursor=LoadCursor(NULL,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&c);
  WNDCLASSW floating={0};floating.lpfnWndProc=transportProc;floating.hInstance=h;floating.lpszClassName=L"RMPTransport";floating.hCursor=c.hCursor;RegisterClassW(&floating);
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
