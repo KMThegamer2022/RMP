@@ -100,6 +100,13 @@ jobs:
           $limit = [DateTime]::UtcNow.AddSeconds(30)
           while ((Test-Path "$app/RMP.exe") -and [DateTime]::UtcNow -lt $limit) { Start-Sleep -Milliseconds 200 }
           if (Test-Path "$app/RMP.exe") { throw 'Uninstall failed' }
+      - name: Preserve theme captures when UI checks fail
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-UI-diagnostics
+          path: RMP-*-preview.png
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
           name: RMP-Windows-x64
