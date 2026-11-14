@@ -1,7 +1,7 @@
 param([string]$Player, [string]$Fixture)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-Add-Type -ReferencedAssemblies System.Drawing.Primitives @'
+Add-Type -ReferencedAssemblies System.Drawing.Primitives,System.Threading.Thread @'
 using System;
 using System.Runtime.InteropServices;
 public class ThemeTest {
