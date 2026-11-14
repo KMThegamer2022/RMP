@@ -25,9 +25,11 @@ GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, a
 
 The Windows interface uses Segoe UI and themed Win32 controls. On a Windows 7 Aero desktop, the frame extends into the player behind the bottom playback controls. A solid frame is used when composition is unavailable or High Contrast is active. GitHub Actions tests portable playback, installation, installed playback, and uninstallation on Windows Server 2022. Visual and runtime testing on Windows 7 SP1 is pending.
 
-## Themes in RMP 2.0
+## Player themes
 
-Open **Theme** in the macOS menu bar or the Windows player’s menu bar. Windows 10/11 uses a Films & TV-style black playback strip with white icon controls, Windows 7 on Windows uses native controls over the bottom frame extension, Windows XP uses a cobalt Luna frame and beveled cream controls, and Mac uses a dark charcoal panel and rounded controls. RMP Default uses a charcoal surface, rounded controls, and orange playback accents. New installations start with RMP Default. The same five choices are available on both platforms. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
+Open **Theme** in the macOS menu bar or the Windows player’s menu bar. The Windows XP theme opens in Now Playing, with the current queue beside the video. The Windows 7 theme opens in a searchable media library with a centered playback bar. The library remembers media opened in RMP. Use the playlist controls to save your queue in M3U format or open a saved playlist. Double-click a track to play it, or double-click the video to enter and leave fullscreen.
+
+New installations start with the VLC theme. Windows 10/11, Mac and RMP Default are also available. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
 
 The Windows 7 theme on Windows uses DwmExtendFrameIntoClientArea with only a bottom margin. Windows and the installed compositor determine the appearance. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
 
@@ -37,11 +39,11 @@ The three Windows themes draw on screenshots of [XP Explorer](https://gekk.info/
 
 Both graphical installers let you select an initial theme. Windows installs for the current account. On macOS, open the setup disk image and run RMP Setup to install in ~/Applications. You can change the theme later from the Theme menu.
 
-Once per launch, RMP checks published GitHub releases in the background. A newer stable version with a matching platform download opens a release-notes prompt. Choose Update (Yes on Windows) to download, verify the GitHub asset's SHA-256 digest, install and reopen. Choose Not now (No on Windows) to reconsider next launch. Updates require a writable installation folder and network access to GitHub. Install this updater-equipped release manually if upgrading from 2.2 or earlier.
+Once per launch, RMP checks published GitHub releases in the background. A newer stable version with a matching platform download opens a release-notes prompt. Choose Update (Yes on Windows) to download, verify the GitHub asset's SHA-256 digest, install and reopen. Choose Not now (No on Windows) to reconsider next launch. Updates require access to GitHub. On macOS, an update launched from a read-only location installs in the current user’s Applications folder. Install this updater-equipped release manually if upgrading from 2.2 or earlier.
 
 ## RMP 2.5
 
-New installations start with **VLC**, a light, compact theme based on VLC's desktop transport. The other five themes remain available, and upgrades retain your selection. The Windows 7 theme uses the standard Windows caption, menus and buttons with the frame extended into the bottom transport area. Fullscreen expands video to the window edges. Its floating controls hide after 2.5 seconds of inactivity and return when the pointer moves. Use the fullscreen control or Escape to leave.
+New installations start with **VLC**, a light, compact theme based on VLC's desktop transport. The other five themes remain available, and upgrades retain your selection. Fullscreen expands video to the window edges. Its floating controls hide after 2.5 seconds of inactivity and return when the pointer moves. Use the fullscreen control or Escape to leave.
 
 The Windows installer registers RMP under Default apps. Choose Rust Media Player in Windows Settings → Apps → Default apps, or choose it from Open with for a media file. On Mac, select a media file in Finder → Get Info → Open with → RMP → Change All. The portable Windows ZIP does not register the application with Windows.
 
