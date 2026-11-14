@@ -26,7 +26,7 @@ static void updateGlass(HWND w){
  HRESULT result=DwmSetWindowAttribute(w,38,&backdrop,sizeof(backdrop));
  if(wanted)glass=SUCCEEDED(result)||accentBlur(w,true);
  }else if(wanted && os.dwMajorVersion==6 && os.dwMinorVersion==1){glass=true;}
- MARGINS frame={0,0,glass?scale(12):0,glass?scale(100):0};
+ MARGINS frame={glass?scale(6):0,glass?scale(6):0,glass?scale(32):0,glass?scale(100):0};
  if(composed && FAILED(DwmExtendFrameIntoClientArea(w,&frame))){
  glass=false;if(modern){int none=1;DwmSetWindowAttribute(w,38,&none,sizeof(none));accentBlur(w,false);}
  }
