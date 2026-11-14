@@ -5,6 +5,9 @@ Add-Type -ReferencedAssemblies System.Drawing.Primitives @'
 using System;
 using System.Runtime.InteropServices;
 public class ThemeTest {
+ [DllImport("user32",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
+ [DllImport("user32")] public static extern bool IsWindowVisible(IntPtr w);
+ [DllImport("user32")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32")] public static extern bool SetWindowPos(IntPtr w,IntPtr after,int x,int y,int cx,int cy,uint flags);
  [DllImport("user32")] public static extern bool PrintWindow(IntPtr w,IntPtr dc,uint flags);
  [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out System.Drawing.Rectangle rect);
@@ -45,6 +48,15 @@ try {
   }
   if ((Get-ItemPropertyValue 'HKCU:\Software\RMP' Theme) -ne ($id-310)){throw 'Preference was not saved'}
  }
+ [void][ThemeTest]::SetCursorPos(10,10)
+ [void][ThemeTest]::SendMessage($w,273,[IntPtr]105,[IntPtr]::Zero)
+ $deck=[ThemeTest]::FindWindow('RMPTransport','Playback controls')
+ if(!$deck.ToInt64() -or ![ThemeTest]::IsWindowVisible($deck)){throw 'Fullscreen controller did not appear'}
+ Start-Sleep -Seconds 4
+ if([ThemeTest]::IsWindowVisible($deck)){throw 'Fullscreen controller did not hide'}
+ [void][ThemeTest]::SetCursorPos(55,55);Start-Sleep -Milliseconds 500
+ if(![ThemeTest]::IsWindowVisible($deck)){throw 'Fullscreen controller did not reappear'}
+ [void][ThemeTest]::SendMessage($w,273,[IntPtr]105,[IntPtr]::Zero)
 } finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
 $p=Start-Process $Player -PassThru
 try {Check-Menu (Get-Window $p) 315} finally {$null=$p.CloseMainWindow();if (!$p.WaitForExit(5000)){$p.Kill()}}
