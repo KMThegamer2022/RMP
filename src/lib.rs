@@ -69,19 +69,32 @@ pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
         volume: 80,
     }))
 }
-// The worker creates an independent LibVLC instance and transfers its sole
-// reference to the UI thread; it never accesses the player or its view.
-struct Engine(Handle);
+// LibVLC creates both objects without a video view. The worker transfers both
+// references together; only the UI thread attaches an HWND or NSView.
+struct Engine {
+    instance: Handle,
+    player: Handle,
+}
 unsafe impl Send for Engine {}
 impl Drop for Engine {
     fn drop(&mut self) {
-        if !self.0.is_null() { unsafe { libvlc_release(self.0) } }
+        unsafe {
+            if !self.player.is_null() {
+                libvlc_media_player_release(self.player);
+            }
+            if !self.instance.is_null() {
+                libvlc_release(self.instance);
+            }
+        }
     }
 }
 #[no_mangle]
 pub extern "C" fn ap_prepare(p: &mut Player) {
     if p.player.is_null() && p.warming.is_none() {
-        p.warming = std::thread::Builder::new().spawn(|| unsafe { create_engine() }).ok();
+        p.warming = std::thread::Builder::new()
+            .name("rmp-playback-init".into())
+            .spawn(|| unsafe { create_engine() })
+            .ok();
     }
 }
 unsafe fn create_engine() -> Engine {
@@ -105,21 +118,22 @@ unsafe fn create_engine() -> Engine {
     if let Some(bank) = &soundfont {
         args.push(bank.as_ptr());
     }
-    Engine(libvlc_new(args.len() as i32, args.as_ptr()))
+    let instance = libvlc_new(args.len() as i32, args.as_ptr());
+    let player = if instance.is_null() {
+        ptr::null_mut()
+    } else {
+        libvlc_media_player_new(instance)
+    };
+    Engine { instance, player }
 }
 unsafe fn ensure_engine(p: &mut Player) -> bool {
     if !p.player.is_null() {
         return true;
     }
-    let instance = p.warming.take().and_then(|task| task.join().ok()).unwrap_or_else(|| create_engine());
-    let engine = instance.0;
-    std::mem::forget(instance);
-    if engine.is_null() {
-        return false;
-    }
-    let player = libvlc_media_player_new(engine);
+    let engine = p.warming.take().and_then(|task| task.join().ok())
+        .unwrap_or_else(|| create_engine());
+    let player = engine.player;
     if player.is_null() {
-        libvlc_release(engine);
         return false;
     }
     #[cfg(windows)]
@@ -130,8 +144,9 @@ unsafe fn ensure_engine(p: &mut Player) -> bool {
     }
     #[cfg(target_os = "macos")]
     libvlc_media_player_set_nsobject(player, p.view);
-    p.engine = engine;
+    p.engine = engine.instance;
     p.player = player;
+    std::mem::forget(engine); // Ownership moves to Player until ap_destroy.
     true
 }
 #[no_mangle]
