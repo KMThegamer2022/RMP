@@ -48,6 +48,7 @@ static int scale(int value){
 #include "fullscreen.h"
 #include "glass-controls.h"
 #include "seven-transport.h"
+extern bool ap_has_video(Player *);
 extern size_t ap_library_count(Player *);
 extern const char *ap_library_item(Player *,size_t);
 extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const char *),ap_playlist_load(Player *,const char *);
@@ -87,7 +88,7 @@ static void layout(HWND w,int x,int y){
 static void applyTheme(HWND w,int value){
  bool changing=value!=skin;
  skin=value;
- if(changing&&mediaTheme())browserPage=skin==XP?NAV_NOW:NAV_LIBRARY;
+ if(changing){awaitingVideo=false;if(mediaTheme())browserPage=skin==XP?NAV_NOW:NAV_LIBRARY;}
  if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(themes[skin].panel));
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
@@ -133,8 +134,10 @@ static void start(size_t index){
 static void showCurrentTrack(void){
  intptr_t index=ap_index(player);
  if(index<0)return;
- if(mediaTheme()&&browserPage==NAV_NOW)rebuildMediaRows();
- if(mediaTheme()&&browserPage!=NAV_NOW)showMediaPage(NAV_NOW);
+ // LibVLC discovers the streams asynchronously. Keep the library available
+ // for audio and reveal the picture once this playback has a video output.
+ awaitingVideo=mediaTheme()&&browserPage!=NAV_NOW;
+ if(mediaTheme())rebuildMediaRows();
  ShowWindow(idleLogo,SW_HIDE);
  wchar_t *title=wide(basename8(ap_item(player,(size_t)index)));SetWindowTextW(mainwin,title);free(title);laststate=-1;
 }
@@ -172,7 +175,12 @@ static void tick(void){
  if(mediaTheme())markPlayingInQueue();
  if(skin==VLC_THEME){wchar_t percent[12];swprintf(percent,12,L"%d%%",volumePercent);SetWindowTextW(volumeLabel,percent);}
  else SetWindowTextW(volumeLabel,L"Volume");
- int s=ap_state(player);if(s==6 && laststate!=6){if(repeatOne){start(ap_index(player));return;}if(shuffle||ap_index(player)+1<(intptr_t)ap_count(player)){nextItem();return;}}laststate=s;
+ int s=ap_state(player);
+ if(awaitingVideo){
+  if(ap_has_video(player))showMediaPage(NAV_NOW);
+  else if(s>=5)awaitingVideo=false;
+ }
+ if(s==6 && laststate!=6){if(repeatOne){start(ap_index(player));return;}if(shuffle||ap_index(player)+1<(intptr_t)ap_count(player)){nextItem();return;}}laststate=s;
  int64_t t=ap_time(player),d=ap_length(player);if(t<0)t=0;
  SetWindowTextW(play,s>=1&&s<=3?L"Ⅱ  Pause":L"▶  Play");EnableWindow(position,ap_seekable(player)&&d>0);
  if(!dragging)SendMessageW(position,TBM_SETPOS,TRUE,d>0?t*1000/d:0);

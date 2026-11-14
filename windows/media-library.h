@@ -4,6 +4,7 @@ static const int browserButtons[]={NAV_NOW,NAV_LIBRARY,NAV_QUEUE,ADD_FILE,LOAD_L
 static const WCHAR *browserTitles[]={L"Now Playing",L"Media Library",L"Current Playlist",L"Open media…",L"Open playlist…",L"Save playlist…"};
 static HWND mediaRows,mediaFilter;
 static int browserPage=NAV_NOW;
+static bool awaitingVideo;
 static int lastQueueMark=-2;
 static const WCHAR *sectionTitle(void){
  return browserPage==NAV_LIBRARY?L"Media Library":browserPage==NAV_QUEUE?L"Current Playlist":L"Now Playing";
@@ -119,7 +120,7 @@ static void layoutMediaBrowser(int width,int deck){
  }
 }
 static void showMediaPage(int page){
- browserPage=page;
+ awaitingVideo=false;browserPage=page;
  SetWindowTextW(mediaFilter,L"");
  RECT r;GetClientRect(mainwin,&r);layout(mainwin,r.right,r.bottom);
  rebuildMediaRows();RedrawWindow(mainwin,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
