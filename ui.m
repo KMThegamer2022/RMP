@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <AVFoundation/AVFoundation.h>
 #include <stdbool.h>
 #import "mac-theme.h"
 #import "updates/mac.h"
@@ -11,11 +12,15 @@ extern bool ap_play(Player *,size_t),ap_seekable(Player *),ap_select(Player *,bo
 extern long ap_index(Player *);
 extern size_t ap_count(Player *);
 extern const char *ap_item(Player *,size_t);
+extern size_t ap_library_count(Player *);
+extern const char *ap_library_item(Player *,size_t);
+extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const char *),ap_playlist_load(Player *,const char *);
+extern bool ap_has_video(Player *);
 extern int ap_state(Player *);
 extern int64_t ap_time(Player *),ap_length(Player *);
 extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool));
 
-@interface PlayerApp : NSObject<NSApplicationDelegate,NSMenuDelegate,NSWindowDelegate>{
+@interface PlayerApp : NSObject<NSApplicationDelegate,NSMenuDelegate,NSWindowDelegate,NSTableViewDataSource,NSTableViewDelegate,NSSearchFieldDelegate>{
  Player *p;
  NSWindow *window;
  NSVisualEffectView *aeroDeck;
@@ -29,6 +34,12 @@ extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool)
  NSImageView *cone;NSStackView *top,*bottom,*timeline;
  NSLayoutConstraint *normalTop,*edgeTop,*normalBottom,*edgeBottom;
 
+ MediaPane *navPane,*mediaHeader,*browserPane,*transportCapsule;
+ NSCache *metadataCache;NSMutableSet *metadataPending;NSOperationQueue *metadataWorkers;NSMutableDictionary *searchNames;NSUInteger searchCursor;BOOL refillScheduled;
+ NSSearchField *searchField;NSTableView *trackTable;NSScrollView *trackScroll;NSImageView *queueArt;NSLayoutConstraint *artHeight;
+ NSTextField *crumb,*tableHeading;NSButton *headerOpen;NSArray<NSButton *> *navButtons;NSArray<NSNumber *> *mediaRows;
+ BOOL pendingVideoSwitch;NSInteger mediaPage;NSLayoutConstraint *browserLeading,*browserWidth,*screenLeft,*screenRight,*mediaTop,*bottomLeft,*bottomRight,*bottomCenter;
+ NSArray<NSView *> *originalTransport;
  NSMutableArray<NSURL *> *pending;
  NSTimer *timer;
  int previous;
@@ -63,6 +74,8 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  NSMenu *file=[self menu:@"File" parent:bar];
  [self item:file title:@"Open Files…" action:@selector(open:) key:@"o"];
  [self item:file title:@"Open Network Stream…" action:@selector(stream:) key:@"u"];
+ [self item:file title:@"Open Playlist…" action:@selector(openPlaylist:) key:@""];
+ [self item:file title:@"Save Playlist…" action:@selector(savePlaylist:) key:@""];
  NSMenu *edit=[self menu:@"Edit" parent:bar];
  for(NSString *s in @[@"Cut",@"Copy",@"Paste",@"Select All"]){
  NSArray *keys=@[@"x",@"c",@"v",@"a"]; NSUInteger n=edit.numberOfItems;
@@ -90,15 +103,30 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  }else if([v isKindOfClass:NSTextField.class] && v!=welcome){((NSTextField *)v).textColor=rgb(t.text);}
  if(v!=screen)for(NSView *child in v.subviews)[self styleView:child];
 }
+#include "mac-library.h"
 -(void)arrangeChrome {
  BOOL edge=inFull||skin==VLC_THEME;
- normalTop.active=NO;edgeTop.active=NO;normalBottom.active=NO;edgeBottom.active=NO;
- (edge?edgeTop:normalTop).active=YES;(inFull?edgeBottom:normalBottom).active=YES;
- top.hidden=edge;timeline.hidden=inFull;bottom.hidden=inFull;
+ mediaTop.active=NO;normalTop.active=NO;edgeTop.active=NO;normalBottom.active=NO;edgeBottom.active=NO;
+ if(edge)edgeTop.active=YES;else if(![self hasMediaLayout])normalTop.active=YES;(inFull?edgeBottom:normalBottom).active=YES;
+ top.hidden=edge||[self hasMediaLayout];timeline.hidden=inFull;bottom.hidden=inFull;
+ [self layoutMediaChrome];
  cone.hidden=skin!=VLC_THEME||(p&&ap_index(p)>=0);welcome.hidden=skin==VLC_THEME||(p&&ap_index(p)>=0);
 }
 -(void)applyTheme:(NSInteger)value {
+ NSInteger oldSkin=skin;
  skin=value>=0 && value<THEME_COUNT?value:VLC_THEME;
+ if(oldSkin!=skin || !navButtons){pendingVideoSwitch=NO;mediaPage=skin==SEVEN?1:0;searchField.stringValue=@"";}
+ if(originalTransport){
+  NSArray *ordered=originalTransport;
+  if(skin==SEVEN)ordered=@[originalTransport[7],originalTransport[6],originalTransport[2],originalTransport[1],play,originalTransport[3],originalTransport[10],originalTransport[4]];
+  if(skin==XP)ordered=@[play,originalTransport[2],originalTransport[1],originalTransport[3],originalTransport[10],originalTransport[6],originalTransport[7],originalTransport[4]];
+  if(![bottom.arrangedSubviews isEqualToArray:ordered]){
+   for(NSView *v in bottom.arrangedSubviews){[bottom removeArrangedSubview:v];[v removeFromSuperview];}
+   for(NSView *v in ordered)[bottom addArrangedSubview:v];
+  }
+  bottomLeft.active=NO;bottomRight.active=NO;bottomCenter.active=NO;
+  if(skin==SEVEN)bottomCenter.active=YES;else{bottomLeft.active=YES;bottomRight.active=skin!=XP;}
+ }
  ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
  BOOL translucent=skin==SEVEN && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency;
  aeroDeck.hidden=!translucent;window.opaque=!translucent;
@@ -131,7 +159,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  window.contentView=[[ThemeSurface alloc]initWithFrame:window.contentView.bounds];NSView *root=window.contentView;root.wantsLayer=YES;
  screen=[NSView new];screen.wantsLayer=YES;screen.layer.backgroundColor=NSColor.blackColor.CGColor;
  [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *event){
-  if(event.window==self->window && event.clickCount==2){
+  if(event.window==self->window && !self->screen.hidden && event.clickCount==2){
    NSPoint point=[self->screen convertPoint:event.locationInWindow fromView:nil];
    if(NSPointInRect(point,self->screen.bounds)){[self full:nil];return nil;}
   }
@@ -154,10 +182,13 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  clockLabel=label(@"0:00 / 0:00",12,NO);clockLabel.font=[NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightRegular];
  timeline=[self row:@[seek,clockLabel]];
  bottom=[self row:@[play,[self button:@"Previous" action:@selector(prev:)],[self button:@"■" action:@selector(stopPlayback:)],[self button:@"Next" action:@selector(next:)],[self button:@"⛶" action:@selector(full:)],[self button:@"Queue" action:@selector(queuePopup:)],[self button:@"↻" action:@selector(repeatToggle:)],[self button:@"⤨" action:@selector(shuffleToggle:)],[NSView new],label(@"Volume",12,NO),volume]];
+ originalTransport=[bottom.arrangedSubviews copy];
  for(NSView *v in @[top,screen,timeline,bottom]){
  [root addSubview:v];v.translatesAutoresizingMaskIntoConstraints=NO;
  CGFloat inset=v==screen?0:16;
- [v.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:inset].active=YES;[v.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-inset].active=YES;
+ NSLayoutConstraint *leading=[v.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:inset], *trailing=[v.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-inset];
+ leading.active=YES;trailing.active=YES;
+ if(v==screen){screenLeft=leading;screenRight=trailing;}if(v==bottom){bottomLeft=leading;bottomRight=trailing;bottomCenter=[bottom.centerXAnchor constraintEqualToAnchor:root.centerXAnchor];}
  }
  [top.topAnchor constraintEqualToAnchor:root.topAnchor constant:10].active=YES;
  normalTop=[screen.topAnchor constraintEqualToAnchor:top.bottomAnchor constant:10];edgeTop=[screen.topAnchor constraintEqualToAnchor:root.topAnchor];
@@ -168,11 +199,12 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  aeroDeck.blendingMode=NSVisualEffectBlendingModeBehindWindow;aeroDeck.state=NSVisualEffectStateActive;
  [root addSubview:aeroDeck positioned:NSWindowBelow relativeTo:timeline];aeroDeck.translatesAutoresizingMaskIntoConstraints=NO;
  [NSLayoutConstraint activateConstraints:@[[aeroDeck.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],[aeroDeck.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],[aeroDeck.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],[aeroDeck.topAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
+ [self buildMediaLayout:root];mediaTop=[screen.topAnchor constraintEqualToAnchor:mediaHeader.bottomAnchor];
  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(VLC_THEME)}];
  [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
  p=ap_create((__bridge void *)screen);
  if(!p){NSAlert *a=[NSAlert new];a.messageText=@"RMP could not load its playback engine.";[a runModal];[NSApp terminate:nil];return;}
- [window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
+ [self rebuildMediaRows];[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
  timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
  if(pending.count){[self accept:pending];pending=nil;}
  [self refresh:nil];
@@ -192,12 +224,13 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 }
 -(void)launch:(size_t)i{
  if(i>=ap_count(p))return;
- previous=-1;welcome.hidden=YES;cone.hidden=YES;
- name.stringValue=[self display:i];window.title=[@"RMP — " stringByAppendingString:name.stringValue];
+ [self showPlayingItem:i];
  status.stringValue=ap_play(p,i)?@"Opening…":@"Could not open media";
 }
 -(void)refresh:(id)sender{
  int state=ap_state(p);
+ if(pendingVideoSwitch && ap_has_video(p)){pendingVideoSwitch=NO;mediaPage=0;[self arrangeChrome];}
+ if(state>=6)pendingVideoSwitch=NO;
  if(state==6 && previous!=6 && repeatOne){[self launch:ap_index(p)];return;}
  if(state==6 && previous!=6 && (shuffle||ap_index(p)+1<(long)ap_count(p))){[self next:nil];return;}
  previous=state;

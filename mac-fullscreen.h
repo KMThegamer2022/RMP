@@ -5,7 +5,7 @@
  panel.collectionBehavior=NSWindowCollectionBehaviorFullScreenAuxiliary;
  NSVisualEffectView *base=[NSVisualEffectView new];base.material=NSVisualEffectMaterialHUDWindow;base.state=NSVisualEffectStateActive;base.wantsLayer=YES;base.layer.cornerRadius=10;panel.contentView=base;
  fp=[self button:@"Play" action:@selector(toggle:)];fs=[NSSlider sliderWithValue:seek.doubleValue minValue:0 maxValue:1 target:self action:@selector(floatSeek:)];fs.continuous=NO;
- fv=[NSSlider sliderWithValue:volume.doubleValue minValue:0 maxValue:100 target:self action:@selector(floatVolume:)];
+ fv=[VolumeSlider sliderWithValue:volume.doubleValue minValue:0 maxValue:100 target:self action:@selector(floatVolume:)];
  NSStackView *buttons=[self row:@[[self button:@"Previous" action:@selector(prev:)],fp,[self button:@"Next" action:@selector(next:)],fv,[self button:@"Exit Full Screen" action:@selector(full:)]]];
  for(NSView *v in @[fs,buttons]){[base addSubview:v];v.translatesAutoresizingMaskIntoConstraints=NO;
  [v.leadingAnchor constraintEqualToAnchor:base.leadingAnchor constant:12].active=YES;[v.trailingAnchor constraintEqualToAnchor:base.trailingAnchor constant:-12].active=YES;}

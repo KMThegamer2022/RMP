@@ -12,6 +12,10 @@ static NSColor *rgb(unsigned v) {
  NSGradient *g=[[NSGradient alloc]initWithColors:@[rgb(t.panel),rgb(0xf2faff),rgb(0xa2c6e3),rgb(t.panel)]];
  [g drawInRect:self.bounds angle:90];
  }else{[rgb(t.panel)setFill];NSRectFill(dirty);}
+ if(self.skin==XP){
+  NSGradient *silver=[[NSGradient alloc]initWithColors:@[rgb(0x7588b0),rgb(0xe1e7f1),rgb(0xfbfcff),rgb(0x869ac4)]];
+  [silver drawInRect:NSMakeRect(0,0,NSWidth(self.bounds),84) angle:90];
+ }
  if(self.skin==XP || self.skin==MODERN){
  NSRect header=self.bounds;header.origin.y=NSMaxY(header)-58;header.size.height=58;
  if(self.skin==XP){
@@ -19,6 +23,29 @@ static NSColor *rgb(unsigned v) {
  [g drawInRect:header angle:90];
  }else{[rgb(0xf5f5f5)setFill];NSRectFill(header);}
  }
+}
+@end
+typedef NS_ENUM(NSInteger, MediaPaneStyle){MediaXPNav,MediaXPHeader,MediaXPQueue,MediaSevenNav,MediaSevenHeader};
+@interface MediaPane:NSView
+@property MediaPaneStyle style;
+@end
+@implementation MediaPane
+-(void)setStyle:(MediaPaneStyle)style{_style=style;[self setNeedsDisplay:YES];}
+-(void)drawRect:(NSRect)dirty{
+ NSArray *colors;
+ switch(self.style){
+  case MediaXPHeader:colors=@[rgb(0x455c9b),rgb(0x536eb1),rgb(0x0b53c7),rgb(0x2c87ff)];break;
+  case MediaXPNav:colors=@[rgb(0x8293bf),rgb(0xe4e9f7),rgb(0xc4d0eb)];break;
+  case MediaXPQueue:colors=@[rgb(0x39436b),rgb(0x5f70a8)];break;
+  case MediaSevenHeader:colors=@[rgb(0xc8d8e8),rgb(0xf7faff),rgb(0xe0ebf7)];break;
+  default:colors=@[rgb(0xdce8f2),rgb(0xf5f9fe)];break;
+ }
+ [[[NSGradient alloc]initWithColors:colors]drawInRect:self.bounds angle:90];
+ if(self.style==MediaXPHeader){
+  NSRect edge=NSMakeRect(1,1,NSWidth(self.bounds)-2,7);
+  [[[NSGradient alloc]initWithStartingColor:rgb(0x687eae) endingColor:rgb(0xdfebf9)]drawInRect:edge angle:90];
+ }
+ [rgb(0x91a6be)setStroke];[NSBezierPath strokeRect:NSInsetRect(self.bounds,.5,.5)];
 }
 @end
 @interface TransportButton:NSButton
@@ -31,18 +58,19 @@ static NSColor *rgb(unsigned v) {
  Theme t=themes[self.skin];NSRect r=NSInsetRect(self.bounds,1.5,2);
  BOOL play=self.action==@selector(toggle:),prev=self.action==@selector(prev:),next=self.action==@selector(next:);
  BOOL transport=play||prev||next,orb=self.skin==SEVEN && play;
- if(orb){CGFloat d=MIN(r.size.width,r.size.height);r=NSMakeRect(NSMidX(r)-d/2,NSMidY(r)-d/2,d,d);}
- NSBezierPath *path=[NSBezierPath bezierPathWithRoundedRect:r xRadius:orb?NSHeight(r)/2:t.radius yRadius:orb?NSHeight(r)/2:t.radius];
+ BOOL silver=self.skin==XP && self.action!=@selector(open:);
+ if(orb || silver){CGFloat d=MIN(r.size.width,r.size.height);r=NSMakeRect(NSMidX(r)-d/2,NSMidY(r)-d/2,d,d);}
+ NSBezierPath *path=[NSBezierPath bezierPathWithRoundedRect:r xRadius:(orb||silver)?NSHeight(r)/2:t.radius yRadius:(orb||silver)?NSHeight(r)/2:t.radius];
  if(self.skin==RMP_DEFAULT && play){t.face=t.accent;t.edge=0xdd6238;t.text=0x16191f;}
  BOOL pressed=self.cell.isHighlighted;
  [NSGraphicsContext saveGraphicsState];[path addClip];
  if(self.skin==XP || self.skin==SEVEN){
- NSArray *stops=orb?@[rgb(0x103369),rgb(0x2585df),rgb(0x1953ae),rgb(0xd8f7ff)]:@[rgb(pressed?t.edge:t.face),rgb(t.face),rgb(t.highlight)];
+ NSArray *stops=silver?@[rgb(0xf4f7fd),rgb(0x9daec7),rgb(0xe1eaf7),rgb(0xffffff)]:orb?@[rgb(0x103369),rgb(0x2585df),rgb(0x1953ae),rgb(0xd8f7ff)]:@[rgb(pressed?t.edge:t.face),rgb(t.face),rgb(t.highlight)];
  NSGradient *g=[[NSGradient alloc]initWithColors:stops];
  [g drawInRect:r angle:90];
  }else{[rgb(pressed?t.edge:t.face)setFill];[path fill];}
  [NSGraphicsContext restoreGraphicsState];[rgb(t.edge)setStroke];if(self.skin!=MODERN)[path stroke];
- if(self.skin==XP && !pressed){[rgb(0xffffff)setStroke];[[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r,1,1) xRadius:2 yRadius:2]stroke];}
+ if(self.skin==XP && !silver && !pressed){[rgb(0xffffff)setStroke];[[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r,1,1) xRadius:2 yRadius:2]stroke];}
  NSDictionary *attrs=@{NSFontAttributeName:self.font,NSForegroundColorAttributeName:rgb(t.text)};
  NSString *caption=self.title;
  if(transport && self.skin!=MAC){
@@ -64,6 +92,14 @@ static NSColor *rgb(unsigned v) {
 @property BOOL wedge;
 @end
 @implementation VolumeSlider
+-(void)scrollWheel:(NSEvent *)event{
+ CGFloat delta=event.scrollingDeltaY;
+ if(event.isDirectionInvertedFromDevice)delta=-delta;
+ if(!delta)return;
+ double step=event.hasPreciseScrollingDeltas?delta*.3:copysign(5,delta);
+ self.doubleValue=MAX(self.minValue,MIN(self.maxValue,self.doubleValue+step));
+ [self sendAction:self.action to:self.target];
+}
 -(void)drawRect:(NSRect)dirty{
  if(!self.wedge){[super drawRect:dirty];return;}
  NSRect r=NSInsetRect(self.bounds,4,2);NSBezierPath *triangle=[NSBezierPath bezierPath];
