@@ -39,7 +39,8 @@ function Check-Menu($w,$id) {
  $state=[ThemeTest]::GetMenuState($menu,$id,0)
  if ($state -eq [uint32]::MaxValue -or !($state -band 8)){throw "Missing checkmark for theme $id"}
 }
-$p=Start-Process $Player -ArgumentList $Fixture -PassThru
+$tagFile=(Resolve-Path 'packaging/fixtures/embedded-tags.mp3').Path
+$p=Start-Process $Player -ArgumentList $Fixture,$tagFile -PassThru
 try {
  $w=Get-Window $p
  Check-Menu $w 315
@@ -56,6 +57,16 @@ try {
     [void][ThemeTest]::SendText($search,12,[IntPtr]::Zero,'does-not-exist-63349')
     $found=[ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero)
     if($found.ToInt32()){throw 'Library search did not filter the rows'}
+    $shell=New-Object -ComObject Shell.Application
+    $folder=$shell.NameSpace((Split-Path $tagFile))
+    $tagTitle=$folder.ParseName((Split-Path $tagFile -Leaf)).ExtendedProperty('System.Title')
+    if($tagTitle -eq 'Aero playback sample'){
+     [void][ThemeTest]::SendText($search,12,[IntPtr]::Zero,$tagTitle)
+     $wait=[Diagnostics.Stopwatch]::StartNew()
+     while(![ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero).ToInt64() -and $wait.ElapsedMilliseconds -lt 7000){Start-Sleep -Milliseconds 50}
+     if(![ThemeTest]::SendMessage($rows,0x1004,[IntPtr]::Zero,[IntPtr]::Zero).ToInt64()){throw 'Embedded title search missed real media'}
+     Write-Host 'Verified embedded title search'
+    }
     [void][ThemeTest]::SendText($search,12,[IntPtr]::Zero,'')
    }
   }
