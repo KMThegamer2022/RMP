@@ -75,7 +75,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 -(void)styleView:(NSView *)v {
  Theme t=themes[skin];
  if([v isKindOfClass:TransportButton.class]){
- TransportButton *b=(TransportButton *)v;b.skin=skin;b.font=[NSFont systemFontOfSize:13 weight:skin==MODERN?NSFontWeightMedium:NSFontWeightRegular];[b setNeedsDisplay:YES];
+ TransportButton *b=(TransportButton *)v;b.skin=skin;b.toolTip=b.title;b.font=[NSFont systemFontOfSize:13 weight:skin==MODERN?NSFontWeightMedium:NSFontWeightRegular];[b setNeedsDisplay:YES];
  }else if([v isKindOfClass:NSTextField.class] && v!=welcome){((NSTextField *)v).textColor=rgb(t.text);}
  if(v!=screen)for(NSView *child in v.subviews)[self styleView:child];
 }
@@ -84,8 +84,16 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
  window.appearance=[NSAppearance appearanceNamed:skin==MAC?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
  window.titlebarAppearsTransparent=YES;
- window.backgroundColor=rgb(skin==XP?0x3978db:themes[skin].panel);
+ window.backgroundColor=rgb(skin==XP?0x3978db:skin==MODERN?0xf5f5f5:themes[skin].panel);
  [self styleView:surface];
+ if(skin==XP || skin==MODERN){NSColor *ink=skin==XP?NSColor.whiteColor:rgb(0x181818);name.textColor=ink;status.textColor=ink;}
+ screen.layer.borderWidth=skin==XP?4:skin==SEVEN?2:0;
+ screen.layer.borderColor=rgb(skin==XP?0x1256ce:0x829db5).CGColor;
+ seek.trackFillColor=rgb(themes[skin].accent);volume.trackFillColor=rgb(themes[skin].accent);
+ for(NSView *v in surface.subviews)if([v isKindOfClass:NSStackView.class] && [((NSStackView *)v).arrangedSubviews containsObject:play]){
+ NSStackView *row=(NSStackView *)v;row.spacing=skin==SEVEN?2:skin==MODERN?18:8;
+ }
+
  for(NSMenuItem *entry in themeMenu.itemArray)entry.state=entry.tag==skin?NSControlStateValueOn:NSControlStateValueOff;
 }
 -(void)pickTheme:(NSMenuItem *)entry {

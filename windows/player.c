@@ -51,9 +51,10 @@ static void updateGlass(HWND w){
  InvalidateRect(w,NULL,TRUE);
 }
 static void layout(HWND w,int x,int y){
- int top=skin==SEVEN||skin==XP?scale(12):0;
+ int top=skin==XP?scale(27):skin==SEVEN?scale(12):0;
+ int frame=skin==XP?scale(4):skin==SEVEN?scale(2):0;
  int deck=y-scale(100),cy=y-scale(55),mid=x/2;
- MoveWindow(video,0,top,x,max(1,deck-top),TRUE);
+ MoveWindow(video,frame,top,x-2*frame,max(1,deck-top),TRUE);
  MoveWindow(idleLogo,(x-scale(96))/2,(deck-top-scale(96))/2,scale(96),scale(96),TRUE);
  MoveWindow(position,scale(16),deck+scale(8),x-scale(166),scale(27),TRUE);
  MoveWindow(clocktext,x-scale(147),deck+scale(6),scale(140),scale(28),TRUE);
@@ -71,7 +72,7 @@ static void applyTheme(HWND w,int value){
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
  /* Windows 11 honors caption color. Older versions keep their native caption. */
- COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:themes[skin].panel);
+ COLORREF caption=contrastMode?0xffffffff:color(skin==XP?0x245edb:skin==MODERN?0xf5f5f5:themes[skin].panel);
  DwmSetWindowAttribute(w,35,&caption,sizeof(caption));
  RECT r;GetClientRect(w,&r);layout(w,r.right,r.bottom);
  RedrawWindow(w,NULL,NULL,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
@@ -147,7 +148,12 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  if(contrastMode)FillRect(dc,&r,GetSysColorBrush(COLOR_BTNFACE));
  else if(glass)FillRect(dc,&r,GetStockObject(BLACK_BRUSH));
  else if(skin==SEVEN){RECT bottom=r;bottom.top=r.bottom-scale(100);blend(dc,bottom,t.highlight,t.panel);r.bottom=scale(12);blend(dc,r,t.highlight,t.panel);}
- else{fillColor(dc,r,color(t.panel));if(skin==XP){r.bottom=scale(12);blend(dc,r,0x4489fa,t.accent);}}
+ else{fillColor(dc,r,color(t.panel));if(skin==XP){
+ RECT frame=r;frame.bottom-=scale(100);fillColor(dc,frame,color(0x1256ce));
+ r.bottom=scale(27);RECT shine=r;shine.bottom=scale(5);blend(dc,shine,0x8bb9ff,0x327df0);
+ r.top=shine.bottom;blend(dc,r,0x0867ed,0x1543b2);
+ SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(255,255,255));SelectObject(dc,uiFont);r.left=scale(9);DrawTextW(dc,L"RMP",-1,&r,DT_LEFT|DT_SINGLELINE|DT_VCENTER);
+ }}
  return 1;}
  case WM_DRAWITEM:if(((DRAWITEMSTRUCT*)lp)->CtlType==ODT_BUTTON){paintButton((DRAWITEMSTRUCT*)lp);return TRUE;}break;
  case WM_CTLCOLORSTATIC:if((HWND)lp!=video && (HWND)lp!=idleLogo && panelBrush && !contrastMode){

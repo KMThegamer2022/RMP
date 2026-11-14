@@ -26,15 +26,23 @@ static void paintButton(DRAWITEMSTRUCT *d){
  if(contrastMode){DrawFrameControl(dc,&r,DFC_BUTTON,DFCS_BUTTONPUSH|((d->itemState&ODS_SELECTED)?DFCS_PUSHED:0));}
  else{
  fillColor(dc,r,glass?RGB(0,0,0):color(t.panel));InflateRect(&r,-1,-1);
- int corner=scale(t.radius*2);
+ bool orb=skin==SEVEN && d->CtlID==PLAY;
+ if(orb){int center=(r.left+r.right)/2,rad=(r.bottom-r.top)/2;r.left=center-rad;r.right=center+rad;}
+ int corner=orb?r.bottom-r.top:scale(t.radius*2);
  HRGN region=CreateRoundRectRgn(r.left,r.top,r.right+1,r.bottom+1,corner,corner);
  int saved=SaveDC(dc);ExtSelectClipRgn(dc,region,RGN_AND);
- if(skin==SEVEN||skin==XP)blend(dc,r,t.highlight,(d->itemState&ODS_SELECTED)?t.edge:t.face);
+ if(orb){RECT upper=r,lower=r;upper.bottom=lower.top=(r.top+r.bottom)/2;blend(dc,upper,0xd7f6ff,0x1953ae);blend(dc,lower,0x2988df,0x103369);}
+ else if(skin==SEVEN||skin==XP)blend(dc,r,t.highlight,(d->itemState&ODS_SELECTED)?t.edge:t.face);
  else fillColor(dc,r,color((d->itemState&ODS_SELECTED)?t.edge:t.face));
- RestoreDC(dc,saved);SetDCBrushColor(dc,color(t.edge));FrameRgn(dc,region,GetStockObject(DC_BRUSH),1,1);DeleteObject(region);
+ RestoreDC(dc,saved);SetDCBrushColor(dc,color(t.edge));if(skin!=MODERN)FrameRgn(dc,region,GetStockObject(DC_BRUSH),1,1);DeleteObject(region);
  }
  wchar_t text[80];GetWindowTextW(d->hwndItem,text,80);SelectObject(dc,uiFont);
  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,contrastMode?GetSysColor(COLOR_BTNTEXT):color(t.text));
+ if(!contrastMode && skin!=MAC){
+ if(d->CtlID==PLAY){wcscpy(text,wcsstr(text,L"Pause")?L"Ⅱ":L"▶");if(skin==SEVEN)SetTextColor(dc,RGB(255,255,255));}
+ if(d->CtlID==PREV)wcscpy(text,L"❘◀");
+ if(d->CtlID==NEXT)wcscpy(text,L"▶❘");
+ }
  DrawTextW(dc,text,-1,&r,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
  if(d->itemState&ODS_FOCUS){InflateRect(&r,-3,-3);DrawFocusRect(dc,&r);}
 }
