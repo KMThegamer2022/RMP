@@ -9,19 +9,15 @@ $client.Headers['Accept']='application/vnd.github+json'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]3072
 $repo='https://github.com/KMThegamer2022/RMP/releases/download/'
 try {
- $json=$client.DownloadString('https://api.github.com/repos/KMThegamer2022/RMP/releases?per_page=100')
- if(Get-Command ConvertFrom-Json -ErrorAction SilentlyContinue){$releases=ConvertFrom-Json -InputObject $json}
- else {Add-Type -AssemblyName System.Web.Extensions;$parser=New-Object Web.Script.Serialization.JavaScriptSerializer;$parser.MaxJsonLength=16777216;$releases=$parser.DeserializeObject($json)}
+ # The update manifest is read from the repository, not the GitHub API, so checks are not rate limited.
+ $manifest=(New-Object Web.Script.Serialization.JavaScriptSerializer).DeserializeObject($client.DownloadString('https://raw.githubusercontent.com/KMThegamer2022/RMP/main/updates/latest.json'))
  $best=[Version]$CurrentVersion
- foreach($r in $releases){
-  if($r.draft -or $r.prerelease -or $r.tag_name -notmatch '^v(\d+\.\d+\.\d+)(?:-windows)?$'){continue}
-  $version=[Version](($r.tag_name -replace '^v','') -replace '-windows$','')
-  if($version -le $best){continue}
-  foreach($a in $r.assets){
-   if($a.name -eq 'RMP-Setup-x64.exe' -and $a.browser_download_url -ceq ($repo+$r.tag_name+'/'+$a.name) -and $a.digest -match '^sha256:[0-9a-f]{64}$'){
-    $best=$version;$release=$r;$asset=$a;break
-   }
-  }
+ $version=[Version]$manifest['version']
+ $win=$manifest['windows']
+ if($version -gt $best -and $win['name'] -ceq 'RMP-Setup-x64.exe' -and [string]$win['sha256'] -match '^[0-9a-f]{64}$'){
+  $best=$version
+  $asset=@{browser_download_url=$repo+$manifest['tag']+'/'+$win['name'];digest='sha256:'+$win['sha256']}
+  $release=@{body=[string]$manifest['notes']}
  }
  if(!$asset){if($Manual){[void][Windows.Forms.MessageBox]::Show("RMP $CurrentVersion is up to date.",'RMP update','OK','Information')};return}
  $player=Get-Process -Id $PlayerId

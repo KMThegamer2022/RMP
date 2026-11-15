@@ -171,20 +171,19 @@ static void finishCheck(NSString *title,NSString *details){
 static void checkMacUpdates(BOOL manual){
  NSString *current=[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];if(!validVersion(current))return;
  explicitCheck|=manual;if(checkingUpdates)return;checkingUpdates=YES;
- NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.github.com/repos/KMThegamer2022/RMP/releases?per_page=100"]];[req setValue:@"RMP-Updater" forHTTPHeaderField:@"User-Agent"];req.timeoutInterval=15;req.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
+ NSMutableURLRequest *req=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://raw.githubusercontent.com/KMThegamer2022/RMP/main/updates/latest.json"]];[req setValue:@"RMP-Updater" forHTTPHeaderField:@"User-Agent"];req.timeoutInterval=15;req.cachePolicy=NSURLRequestReloadIgnoringLocalCacheData;
  [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
  if(error||[(NSHTTPURLResponse *)response statusCode]!=200){finishCheck(@"Could not check for updates",error.localizedDescription?:[NSString stringWithFormat:@"GitHub returned HTTP %ld.",(long)[(NSHTTPURLResponse *)response statusCode]]);return;}
- id releases=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];if(![releases isKindOfClass:NSArray.class]){finishCheck(@"Could not check for updates",@"GitHub returned an unexpected response.");return;}
+ id manifest=[NSJSONSerialization JSONObjectWithData:data options:0 error:nil];if(![manifest isKindOfClass:NSDictionary.class]){finishCheck(@"Could not check for updates",@"The update information was unexpected.");return;}
  NSString *best=current,*notes=nil;NSDictionary *asset=nil;
- for(NSDictionary *r in releases){if([r[@"prerelease"] boolValue]||[r[@"draft"] boolValue])continue;
- NSString *tag=r[@"tag_name"];if(![tag hasPrefix:@"v"])continue;
- NSString *v=[tag substringFromIndex:1];if([v hasSuffix:@"-macos"])v=[v substringToIndex:v.length-6];
- if(!validVersion(v)||[v compare:best options:NSNumericSearch]!=NSOrderedDescending)continue;
- for(NSDictionary *a in r[@"assets"]){NSString *name=a[@"name"];
- if(![name hasPrefix:@"RMP-"]||![name hasSuffix:@"macOS-arm64.zip"]||[name containsString:@"/"])continue;
- NSString *expected=[NSString stringWithFormat:@"https://github.com/KMThegamer2022/RMP/releases/download/%@/%@",tag,name];
- if(![expected isEqual:a[@"browser_download_url"]]||![a[@"digest"] isKindOfClass:NSString.class]||![a[@"digest"] hasPrefix:@"sha256:"])continue;
- best=v;asset=a;notes=[r[@"body"] isKindOfClass:NSString.class]?r[@"body"]:@"";break;}
+ NSString *v=[manifest[@"version"] isKindOfClass:NSString.class]?manifest[@"version"]:@"";
+ NSString *tag=[manifest[@"tag"] isKindOfClass:NSString.class]?manifest[@"tag"]:@"";
+ NSDictionary *mac=[manifest[@"macos"] isKindOfClass:NSDictionary.class]?manifest[@"macos"]:@{};
+ NSString *name=[mac[@"name"] isKindOfClass:NSString.class]?mac[@"name"]:@"";
+ NSString *sha=[mac[@"sha256"] isKindOfClass:NSString.class]?mac[@"sha256"]:@"";
+ if(validVersion(v)&&[v compare:best options:NSNumericSearch]==NSOrderedDescending&&tag.length&&[name hasPrefix:@"RMP-"]&&[name hasSuffix:@"macOS-arm64.zip"]&&![name containsString:@"/"]&&sha.length==64){
+  best=v;notes=[manifest[@"notes"] isKindOfClass:NSString.class]?manifest[@"notes"]:@"";
+  asset=@{@"browser_download_url":[NSString stringWithFormat:@"https://github.com/KMThegamer2022/RMP/releases/download/%@/%@",tag,name],@"digest":[@"sha256:" stringByAppendingString:sha]};
  }
  if(!asset){finishCheck(@"RMP is up to date",[NSString stringWithFormat:@"You are running RMP %@.",current]);return;}
  dispatch_async(dispatch_get_main_queue(),^{NSAlert *a=[NSAlert new];a.messageText=[NSString stringWithFormat:@"Update to RMP %@?",best];a.informativeText=@"RMP will download the update and reopen. If this copy is read-only, the update will be installed in your personal Applications folder.";

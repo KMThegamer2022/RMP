@@ -298,7 +298,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_OWNERDRAW);
  makeMediaBrowser();
- SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SetWindowSubclass(position,seekProc,3,0);SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
+ SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SetWindowSubclass(position,seekProc,3,0);SendMessageW(position,TBM_CLEARTICS,TRUE,0);SendMessageW(level,TBM_CLEARTICS,TRUE,0);SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
  case REVEAL_TERMINAL:revealTerminal();return 0;
  case WM_MOUSEWHEEL:if(routeWheel(w,wp,lp))return 0;break;
@@ -329,11 +329,18 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  NMCUSTOMDRAW *draw=(NMCUSTOMDRAW *)lp;
  if(draw->dwDrawStage==CDDS_PREPAINT && skin==XP){xpControlBackdrop(notice->hwndFrom,draw->hdc);return CDRF_NOTIFYITEMDRAW;}
  if(draw->dwDrawStage==CDDS_PREPAINT && skin==VLC_THEME && notice->hwndFrom==level){
- RECT r;GetClientRect(level,&r);fillColor(draw->hdc,r,color(themes[skin].panel));InflateRect(&r,-3,-3);
- POINT points[]={{r.left,r.bottom},{r.right,r.top},{r.right,r.bottom}};
- HRGN triangle=CreatePolygonRgn(points,3,WINDING);int save=SaveDC(draw->hdc);ExtSelectClipRgn(draw->hdc,triangle,RGN_AND);
- fillColor(draw->hdc,r,color(0xe0e0e0));RECT filled=r;filled.right=r.left+MulDiv(r.right-r.left,SendMessageW(level,TBM_GETPOS,0,0),100);fillColor(draw->hdc,filled,color(0x48c638));RestoreDC(draw->hdc,save);
- SetDCBrushColor(draw->hdc,color(0x777777));FrameRgn(draw->hdc,triangle,GetStockObject(DC_BRUSH),1,1);DeleteObject(triangle);return CDRF_SKIPDEFAULT;}
+ RECT c;GetClientRect(level,&c);fillColor(draw->hdc,c,color(themes[skin].panel));
+ int left=c.left+scale(2),right=c.right-scale(2),top=c.top+scale(2),bottom=c.bottom-scale(2);
+ int value=(int)SendMessageW(level,TBM_GETPOS,0,0);value=max(0,min(100,value));
+ int xf=left+(right-left)*value/100;
+ int hf=bottom-(bottom-top)*(xf-left)/max(1,right-left);
+ POINT outline[]={{left,bottom},{right,top},{right,bottom},{left,bottom}};
+ POINT fill[]={{left,bottom},{xf,hf},{xf,bottom}};
+ SelectObject(draw->hdc,GetStockObject(DC_BRUSH));SelectObject(draw->hdc,GetStockObject(DC_PEN));
+ SetDCBrushColor(draw->hdc,color(0xe0e0e0));SetDCPenColor(draw->hdc,color(0xe0e0e0));Polygon(draw->hdc,outline,4);
+ if(value>0){SetDCBrushColor(draw->hdc,color(0x48c638));SetDCPenColor(draw->hdc,color(0x48c638));Polygon(draw->hdc,fill,3);}
+ SetDCPenColor(draw->hdc,color(0x777777));Polyline(draw->hdc,outline,4);
+ return CDRF_SKIPDEFAULT;}
  if(draw->dwDrawStage==CDDS_PREPAINT && skin==VLC_THEME && notice->hwndFrom==position){
  RECT r;GetClientRect(position,&r);fillColor(draw->hdc,r,color(themes[skin].panel));
  RECT track=r;InflateRect(&track,-scale(5),0);int mid=(track.top+track.bottom)/2;track.top=mid-scale(3);track.bottom=mid+scale(3);
@@ -344,6 +351,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  if(draw->dwDrawStage==CDDS_PREPAINT)return CDRF_NOTIFYITEMDRAW;
  if(draw->dwDrawStage==CDDS_ITEMPREPAINT){
  RECT r=draw->rc;Theme t=themes[skin];
+ if(draw->dwItemSpec==TBCD_TICS)return CDRF_SKIPDEFAULT;
  if(draw->dwItemSpec==TBCD_CHANNEL){
  int mid=(r.top+r.bottom)/2;r.top=mid-scale(2);r.bottom=mid+scale(2);
  fillColor(draw->hdc,r,color(t.edge));int pos=SendMessageW(notice->hwndFrom,TBM_GETPOS,0,0);
