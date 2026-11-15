@@ -71,7 +71,7 @@
   [trackScroll.trailingAnchor constraintEqualToAnchor:browserPane.trailingAnchor],[trackScroll.bottomAnchor constraintEqualToAnchor:browserPane.bottomAnchor]]];
 }
 -(void)layoutMediaChrome {
- BOOL active=[self hasMediaLayout]&&!inFull, playing=mediaPage==0, sidebar=skin==XP && playing;
+ BOOL active=[self hasMediaLayout]&&!inFull&&!minimalInterface&&!wallpaper, playing=mediaPage==0, sidebar=skin==XP && playing;
  navPane.hidden=mediaHeader.hidden=!active;browserPane.hidden=!active || (playing&&!sidebar);
  transportCapsule.hidden=!(active&&skin==SEVEN);
  screen.hidden=active && !playing;
@@ -134,7 +134,7 @@
   [self performSelector:@selector(indexSearchBatch) withObject:nil afterDelay:0.02];
 }
 -(void)refilterMetadata {refillScheduled=NO;[self rebuildMediaRows];}
--(NSInteger)numberOfRowsInTableView:(NSTableView *)table{return mediaRows.count;}
+-(NSInteger)numberOfRowsInTableView:(NSTableView *)table{return table==queueList?(p?ap_count(p):0):mediaRows.count;}
 -(NSDictionary *)metadataForPath:(NSString *)path {
  NSDictionary *cached=[metadataCache objectForKey:path];
  if(cached || [metadataPending containsObject:path] || !path.isAbsolutePath)return cached;
@@ -170,6 +170,10 @@
  return nil;
 }
 -(NSView *)tableView:(NSTableView *)table viewForTableColumn:(NSTableColumn *)column row:(NSInteger)row {
+ if(table==queueList){
+  if(!p||row<0||row>=ap_count(p))return nil;
+  NSTextField *text=[table makeViewWithIdentifier:@"queue" owner:self];if(!text){text=label(@"",12,NO);text.identifier=@"queue";}text.stringValue=[self display:row];return text;
+ }
  if(row<0 || row>=mediaRows.count || !p)return nil;
  size_t i=mediaRows[row].unsignedIntegerValue;
  const char *raw=mediaPage==1?ap_library_item(p,i):ap_item(p,i);if(!raw)return nil;

@@ -20,6 +20,9 @@ extern char *ap_terminal_complete(Player *,const char *);
 extern char *ap_terminal_prompt(Player *);
 extern int ap_terminal_volume(Player *);
 extern void ap_terminal_free(char *);
+extern char *ap_menu_action(Player *,const char *,const char *);
+extern char *ap_menu_options(Player *,const char *);
+static NSString *takeTerminalString(char *);
 extern bool ap_has_video(Player *);
 extern int ap_state(Player *);
 extern int64_t ap_time(Player *),ap_length(Player *);
@@ -32,6 +35,14 @@ extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool)
  NSScrollView *terminalScroll;NSLayoutConstraint *terminalTextHeight;NSTextView *terminalTranscript;NSTextField *terminalInput,*terminalPrompt;
  NSMutableArray<NSString *> *terminalHistory;NSUInteger terminalHistoryIndex;NSString *terminalDraft;
  NSView *idleBlack;
+ NSImageView *pausedMark;NSImage *pausedRMP,*pausedCone;
+ NSMapTable<NSMenu *,NSString *> *optionKeys;NSMenu *recentMenu;
+ NSMutableDictionary *effectValues;
+ BOOL quitAtEnd,recording,wallpaper,alwaysTop,minimalInterface,advancedVisible,statusVisible,playlistDocked,playlistShown;
+ NSRect restoreFrame;NSWindowStyleMask restoreStyle;NSWindowCollectionBehavior restoreCollection;
+ NSPanel *queuePanel;NSTableView *queueList;NSScrollView *queueScroll;NSView *dockedList;
+ NSStackView *extraControls;NSTextField *statusLine;NSLayoutConstraint *bottomInset,*extraBottom;
+ NSUInteger lastQueueCount;
  NSVisualEffectView *aeroDeck;
  NSView *screen;
  NSTextField *name,*status,*clockLabel,*welcome;
@@ -74,33 +85,25 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  NSMenu *m=[[NSMenu alloc]initWithTitle:title];item.submenu=m;return m;
 }
 -(void)manualUpdate:(id)sender{checkMacUpdates(YES);}
+#include "mac-menus.h"
 -(void)menus{
  NSMenu *bar=[NSMenu new];NSApp.mainMenu=bar;
  NSMenu *app=[self menu:@"RMP" parent:bar];
+ [app addItemWithTitle:@"About RMP" action:@selector(orderFrontStandardAboutPanel:) keyEquivalent:@""];
  [self item:app title:@"Check for Updates…" action:@selector(manualUpdate:) key:@""];
  [app addItem:NSMenuItem.separatorItem];
  [app addItemWithTitle:@"Quit RMP" action:@selector(terminate:) keyEquivalent:@"q"];
- NSMenu *file=[self menu:@"File" parent:bar];
- [self item:file title:@"Open Files…" action:@selector(open:) key:@"o"];
- [self item:file title:@"Open Network Stream…" action:@selector(stream:) key:@"u"];
- [self item:file title:@"Open Playlist…" action:@selector(openPlaylist:) key:@""];
- [self item:file title:@"Save Playlist…" action:@selector(savePlaylist:) key:@""];
  NSMenu *edit=[self menu:@"Edit" parent:bar];
  for(NSString *s in @[@"Cut",@"Copy",@"Paste",@"Select All"]){
  NSArray *keys=@[@"x",@"c",@"v",@"a"]; NSUInteger n=edit.numberOfItems;
  [edit addItemWithTitle:s action:NSSelectorFromString(@[@"cut:",@"copy:",@"paste:",@"selectAll:"][n]) keyEquivalent:keys[n]];
  }
- NSMenu *media=[self menu:@"Playback" parent:bar];
- playMenuItem=[self item:media title:@"Play / Pause" action:@selector(toggle:) key:@" "];playMenuItem.keyEquivalentModifierMask=0;
- [self item:media title:@"Previous Item" action:@selector(prev:) key:@"["];
- [self item:media title:@"Next Item" action:@selector(next:) key:@"]"];
- [self item:media title:@"Toggle Full Screen" action:@selector(full:) key:@"f"].keyEquivalentModifierMask=NSEventModifierFlagControl|NSEventModifierFlagCommand;
- queue=[self menu:@"Queue" parent:bar];audio=[self menu:@"Audio Track" parent:bar];subs=[self menu:@"Subtitles" parent:bar];
- themeMenu=[self menu:@"Theme" parent:bar];
+ [self installPlayerMenus:bar];effectValues=[NSMutableDictionary new];
+ themeMenu=[self menu:@"Theme" parent:[bar itemWithTitle:@"View"].submenu];
  for(NSString *title in @[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac",@"Linux"]){
  NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];const NSInteger ids[]={VLC_THEME,RMP_DEFAULT,MODERN,SEVEN,XP,MAC,LINUX_THEME};entry.tag=ids[themeMenu.numberOfItems-1];
  }
- queue.delegate=self;audio.delegate=self;subs.delegate=self;
+
 }
 -(NSButton *)button:(NSString *)title action:(SEL)action{
  TransportButton *b=[TransportButton buttonWithTitle:title target:self action:action];b.bordered=NO;return b;
@@ -115,12 +118,19 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 #include "mac-library.h"
 #include "mac-terminal.h"
 -(void)arrangeChrome {
- BOOL terminal=skin==LINUX_THEME;BOOL edge=inFull||skin==VLC_THEME||terminal;
+ BOOL terminal=skin==LINUX_THEME, bare=inFull||terminal||wallpaper||minimalInterface;BOOL edge=bare||skin==VLC_THEME;
  mediaTop.active=NO;normalTop.active=NO;edgeTop.active=NO;normalBottom.active=NO;edgeBottom.active=NO;
- if(edge)edgeTop.active=YES;else if(![self hasMediaLayout])normalTop.active=YES;((inFull||terminal)?edgeBottom:normalBottom).active=YES;
- top.hidden=edge||[self hasMediaLayout];timeline.hidden=inFull||terminal;bottom.hidden=inFull||terminal;
- [self layoutMediaChrome];
- cone.hidden=skin!=VLC_THEME||(p&&ap_index(p)>=0);welcome.hidden=terminal||skin==VLC_THEME||(p&&ap_index(p)>=0);
+ if(edge)edgeTop.active=YES;else if(![self hasMediaLayout])normalTop.active=YES;(bare?edgeBottom:normalBottom).active=YES;
+ top.hidden=edge||[self hasMediaLayout];timeline.hidden=bare;bottom.hidden=bare;
+ [self layoutMediaChrome];[self updateViewControls];
+ cone.hidden=skin!=VLC_THEME||(p&&ap_index(p)>=0);welcome.hidden=YES;
+}
+/* Shows the RMP logo (VLC keeps its cone) while paused, stopped, or idle. */
+-(void)syncPausedMark:(int)state{
+ BOOL idle=!p||ap_index(p)<0;
+ BOOL show=!screen.hidden && (state==4 || state==5 || (idle && skin!=VLC_THEME));
+ if(skin==VLC_THEME && idle)show=NO;
+ pausedMark.hidden=!show;
 }
 -(void)applyTheme:(NSInteger)value {
  NSInteger oldSkin=skin;
@@ -153,6 +163,8 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  NSStackView *row=(NSStackView *)v;row.spacing=skin==SEVEN?2:skin==MODERN?18:8;
  }
 
+ pausedMark.image=skin==VLC_THEME?pausedCone:pausedRMP;
+ [self syncPausedMark:p?ap_state(p):0];
  idleBlack.hidden=skin!=LINUX_THEME || (p && ap_has_video(p) && ap_state(p)<=4);
  if(skin==LINUX_THEME){[self showTerminal:nil];if(panel)[panel orderOut:nil];}
  else if(oldSkin==LINUX_THEME){[terminalWindow orderOut:nil];[window makeKeyAndOrderFront:nil];if(inFull)[self showFloatingTransport];}
@@ -208,18 +220,24 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  normalTop=[screen.topAnchor constraintEqualToAnchor:top.bottomAnchor constant:10];edgeTop=[screen.topAnchor constraintEqualToAnchor:root.topAnchor];
  normalBottom=[timeline.topAnchor constraintEqualToAnchor:screen.bottomAnchor constant:6];edgeBottom=[screen.bottomAnchor constraintEqualToAnchor:root.bottomAnchor];
  [bottom.topAnchor constraintEqualToAnchor:timeline.bottomAnchor constant:6].active=YES;
- [bottom.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12].active=YES;
+ bottomInset=[bottom.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12];bottomInset.active=YES;
  aeroDeck=[[NSVisualEffectView alloc]initWithFrame:NSZeroRect];aeroDeck.material=NSVisualEffectMaterialLight;
  aeroDeck.blendingMode=NSVisualEffectBlendingModeBehindWindow;aeroDeck.state=NSVisualEffectStateActive;
  [root addSubview:aeroDeck positioned:NSWindowBelow relativeTo:timeline];aeroDeck.translatesAutoresizingMaskIntoConstraints=NO;
  [NSLayoutConstraint activateConstraints:@[[aeroDeck.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],[aeroDeck.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],[aeroDeck.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],[aeroDeck.topAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
  idleBlack=[NSView new];idleBlack.wantsLayer=YES;idleBlack.layer.backgroundColor=NSColor.blackColor.CGColor;idleBlack.translatesAutoresizingMaskIntoConstraints=NO;
  [root addSubview:idleBlack positioned:NSWindowAbove relativeTo:screen];[NSLayoutConstraint activateConstraints:@[[idleBlack.leadingAnchor constraintEqualToAnchor:screen.leadingAnchor],[idleBlack.trailingAnchor constraintEqualToAnchor:screen.trailingAnchor],[idleBlack.topAnchor constraintEqualToAnchor:screen.topAnchor],[idleBlack.bottomAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
- [self buildMediaLayout:root];mediaTop=[screen.topAnchor constraintEqualToAnchor:mediaHeader.bottomAnchor];
+ pausedMark=[NSImageView new];pausedMark.translatesAutoresizingMaskIntoConstraints=NO;pausedMark.imageScaling=NSImageScaleProportionallyUpOrDown;
+ pausedRMP=[NSImage imageNamed:@"RMP"];if(!pausedRMP)pausedRMP=[[NSImage alloc]initWithContentsOfFile:[NSBundle.mainBundle pathForResource:@"RMP" ofType:@"icns"]];
+ pausedCone=[NSImage imageNamed:@"vlc-cone"];pausedMark.hidden=YES;
+ [root addSubview:pausedMark positioned:NSWindowAbove relativeTo:idleBlack];
+ [NSLayoutConstraint activateConstraints:@[[pausedMark.centerXAnchor constraintEqualToAnchor:screen.centerXAnchor],[pausedMark.centerYAnchor constraintEqualToAnchor:screen.centerYAnchor],[pausedMark.widthAnchor constraintEqualToConstant:96],[pausedMark.heightAnchor constraintEqualToConstant:96]]];
+ [self makeViewControls:root];[self buildMediaLayout:root];mediaTop=[screen.topAnchor constraintEqualToAnchor:mediaHeader.bottomAnchor];
  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(VLC_THEME)}];
  [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
  p=ap_create((__bridge void *)screen);
  if(!p){NSAlert *a=[NSAlert new];a.messageText=@"RMP could not load its playback engine.";[a runModal];[NSApp terminate:nil];return;}
+ if([NSUserDefaults.standardUserDefaults objectForKey:@"StartupVolume"]){volume.integerValue=[NSUserDefaults.standardUserDefaults integerForKey:@"StartupVolume"];[self changeVolume:volume];}
  [self rebuildMediaRows];[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
  timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
  if(pending.count){[self accept:pending];pending=nil;}
@@ -240,21 +258,24 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 }
 -(void)launch:(size_t)i{
  if(i>=ap_count(p))return;
- [self showPlayingItem:i];
+ [self showPlayingItem:i];[self rememberRecent:[NSString stringWithUTF8String:ap_item(p,i)]];
  status.stringValue=ap_play(p,i)?@"Opening…":@"Could not open media";
 }
 -(void)refresh:(id)sender{
  int state=ap_state(p);
+ [self syncPausedMark:state];
+ if(lastQueueCount!=ap_count(p)){lastQueueCount=ap_count(p);[queueList reloadData];}
  if(skin==LINUX_THEME)idleBlack.hidden=state>=1&&state<=4&&ap_has_video(p);
  if(pendingVideoSwitch && ap_has_video(p)){pendingVideoSwitch=NO;mediaPage=0;[self arrangeChrome];}
  if(state>=6)pendingVideoSwitch=NO;
  if(state==6 && previous!=6 && repeatOne){[self launch:ap_index(p)];return;}
  if(state==6 && previous!=6 && (shuffle||ap_index(p)+1<(long)ap_count(p))){[self next:nil];return;}
+ if(state==6 && previous!=6 && quitAtEnd){[NSApp terminate:nil];return;}
  previous=state;
  NSArray *states=@[@"Ready",@"Opening…",@"Buffering…",@"Playing",@"Paused",@"Stopped",@"Finished",@"Playback error"];
  status.stringValue=states[MAX(0,MIN(7,state))];play.title=state>=1&&state<=3?@"Pause":@"Play";
  int64_t t=ap_time(p),d=ap_length(p);seek.enabled=ap_seekable(p)&&d>0;
- seek.doubleValue=d>0?(double)t/d:0;clockLabel.stringValue=[NSString stringWithFormat:@"%@ / %@",stamp(t),d>0?stamp(d):@"—"];[self refreshFloating];
+ seek.doubleValue=d>0?(double)t/d:0;clockLabel.stringValue=[NSString stringWithFormat:@"%@ / %@",stamp(t),d>0?stamp(d):@"—"];statusLine.stringValue=[NSString stringWithFormat:@"%@   %@",status.stringValue,clockLabel.stringValue];[self refreshFloating];
 }
 -(void)open:(id)s{
  ap_prepare(p);
@@ -277,7 +298,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 #include "mac-fullscreen.h"
 -(void)stopPlayback:(id)s{ap_stop(p);}
 -(void)queuePopup:(NSButton *)s{[queue popUpMenuPositioningItem:nil atLocation:NSMakePoint(0,s.bounds.size.height) inView:s];}
--(void)full:(id)s{[window toggleFullScreen:nil];}
+-(void)full:(id)s{if(wallpaper)[self toggleWallpaper];[window toggleFullScreen:nil];}
 -(void)scrub:(id)s{ap_seek(p,seek.doubleValue*ap_length(p));}
 -(void)changeVolume:(id)s{ap_volume(p,volume.intValue);}
 -(void)choose:(NSMenuItem *)i{if(i.menu==queue)[self launch:i.tag];else if(!ap_select(p,i.menu==subs,(int)i.tag))NSBeep();}
@@ -286,6 +307,7 @@ static void addTrack(void *context,int idNum,const char *title,bool active){
  i.target=m.delegate;i.tag=idNum;i.state=active?NSControlStateValueOn:NSControlStateValueOff;
 }
 -(void)menuNeedsUpdate:(NSMenu *)m{
+ if([self populateMediaMenu:m])return;
  [m removeAllItems];if(!p)return;
  if(m==queue){for(size_t n=0;n<ap_count(p);n++)addTrack((__bridge void *)m,(int)n,[self display:n].UTF8String,(long)n==ap_index(p));}
  else ap_tracks(p,m==subs,(__bridge void *)m,addTrack);

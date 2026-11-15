@@ -141,6 +141,7 @@ static NSString *takeTerminalString(char *text){
  if(note.object==terminalWindow)playMenuItem.keyEquivalent=@" ";
 }
 -(BOOL)windowShouldClose:(NSWindow *)closing{
+ if(closing==queuePanel){playlistShown=NO;[queuePanel orderOut:nil];return NO;}
  if(closing==terminalWindow){[terminalWindow orderOut:nil];[window makeKeyAndOrderFront:nil];return NO;}
  if(closing==window && terminalWindow){[terminalWindow orderOut:nil];[terminalWindow close];}
  return YES;

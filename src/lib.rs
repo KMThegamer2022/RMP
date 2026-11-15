@@ -3,6 +3,8 @@ use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 mod media_library;
 mod terminal;
+mod vlc_menu;
+mod broadcast;
 use media_library::{Item, Library};
 use std::path::Path;
 type Handle = *mut c_void;
@@ -55,6 +57,7 @@ pub struct Player {
     queue: Vec<Item>,
     library: Library,
     terminal: terminal::Terminal,
+    menus: vlc_menu::Menus,
     current: Option<usize>,
     volume: i32,
 }
@@ -68,6 +71,7 @@ pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
         queue: Vec::new(),
         library: Library::new(),
         terminal: terminal::Terminal::new(),
+        menus: vlc_menu::Menus::default(),
         current: None,
         volume: 80,
     }))
@@ -149,12 +153,14 @@ unsafe fn ensure_engine(p: &mut Player) -> bool {
     libvlc_media_player_set_nsobject(player, p.view);
     p.engine = engine.instance;
     p.player = player;
+    vlc_menu::attach(p);
     std::mem::forget(engine); // Ownership moves to Player until ap_destroy.
     true
 }
 #[no_mangle]
 pub unsafe extern "C" fn ap_destroy(raw: *mut Player) {
-    let p = Box::from_raw(raw);
+    let mut p = Box::from_raw(raw);
+    vlc_menu::close(&mut p);
     if p.player.is_null() {
         return;
     }
@@ -236,6 +242,7 @@ pub unsafe extern "C" fn ap_play(p: &mut Player, i: usize) -> bool {
         return false;
     }
     libvlc_media_player_stop(p.player);
+    vlc_menu::configure_media(p,m,i);
     libvlc_media_player_set_media(p.player, m);
     libvlc_media_release(m);
     p.current = Some(i);
