@@ -10,6 +10,8 @@ Var Theme2
 Var Theme3
 !include associations.nsh
 Var Theme6
+Var DesktopChoice
+Var DesktopBox
 Var Theme5
 Var Theme4
 Name "RMP - Rust Media Player"
@@ -65,9 +67,20 @@ Function ThemePage
  ${If} $ThemeChoice == 6
   ${NSD_Check} $Theme6
  ${EndIf}
+ ${NSD_CreateCheckBox} 8u 138u 90% 12u "Create a desktop shortcut"
+ Pop $DesktopBox
+ ${If} $DesktopChoice == 1
+  ${NSD_Check} $DesktopBox
+ ${EndIf}
  nsDialogs::Show
 FunctionEnd
 Function ThemeLeave
+ ${NSD_GetState} $DesktopBox $0
+ ${If} $0 == ${BST_CHECKED}
+  StrCpy $DesktopChoice 1
+ ${Else}
+  StrCpy $DesktopChoice 0
+ ${EndIf}
  ${NSD_GetState} $Theme6 $0
  ${If} $0 == ${BST_CHECKED}
   StrCpy $ThemeChoice 6
@@ -98,6 +111,11 @@ Function ThemeLeave
  ${EndIf}
 FunctionEnd
 Function .onInit
+ StrCpy $DesktopChoice 1
+ ReadRegDWORD $0 HKCU "Software\RMP" "DesktopShortcut"
+ ${IfNot} ${Errors}
+  StrCpy $DesktopChoice $0
+ ${EndIf}
  ReadRegDWORD $ThemeChoice HKCU "Software\RMP" "Theme"
  ${If} ${Errors}
  ${OrIf} $ThemeChoice > 6
@@ -134,6 +152,10 @@ Section
  File /r "..\build\RMP\*.*"
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
+ WriteRegDWORD HKCU "Software\RMP" "DesktopShortcut" $DesktopChoice
+ ${If} $DesktopChoice == 1
+  CreateShortcut "$DESKTOP\RMP.lnk" "$INSTDIR\RMP.exe"
+ ${EndIf}
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP - Rust Media Player"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "3.2.0"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
@@ -148,6 +170,7 @@ Section "Uninstall"
  Delete "$INSTDIR\Uninstall.exe"
  RMDir "$INSTDIR"
  Delete "$SMPROGRAMS\RMP.lnk"
+ Delete "$DESKTOP\RMP.lnk"
  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP"
  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd

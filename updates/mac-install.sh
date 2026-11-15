@@ -17,7 +17,14 @@ if [ -e "$destination" ] || [ -L "$destination" ]; then
  fi
 fi
 if mv "$stage/RMP.app" "$destination"; then
- if /usr/bin/open -n "$destination"; then /bin/rm -r "$stage"; exit 0; fi
+ if /usr/bin/open -n "$destination"; then
+  desktop="$HOME/Desktop/RMP.app"
+  if [ "$(/usr/bin/defaults read io.github.kmthegamer2022.rmp DesktopShortcut 2>/dev/null || echo 1)" != 0 ]; then
+   [ -L "$desktop" ] && /bin/rm -f "$desktop"
+   [ -e "$desktop" ] || /bin/ln -s "$destination" "$desktop" || true
+  fi
+  /bin/rm -r "$stage"; exit 0
+ fi
  mv "$destination" "$stage/failed.app"
 fi
 if [ -e "$stage/previous.app" ]; then

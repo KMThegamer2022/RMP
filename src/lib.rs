@@ -5,6 +5,7 @@ mod media_library;
 mod terminal;
 mod vlc_menu;
 mod broadcast;
+mod ytdlp;
 use media_library::{Item, Library};
 use std::path::Path;
 type Handle = *mut c_void;
@@ -234,7 +235,8 @@ pub unsafe extern "C" fn ap_play(p: &mut Player, i: usize) -> bool {
         return false;
     };
     let m = if *network {
-        libvlc_media_new_location(p.engine, s.as_ptr())
+        let resolved = ytdlp::direct_url(s.as_c_str());
+        libvlc_media_new_location(p.engine, resolved.as_ref().unwrap_or(s).as_ptr())
     } else {
         libvlc_media_new_path(p.engine, s.as_ptr())
     };

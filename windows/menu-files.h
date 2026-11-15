@@ -94,12 +94,38 @@ static void applyViewFlags(void){
  SetWindowPos(mainwin,topUI?HWND_TOPMOST:HWND_NOTOPMOST,0,0,0,0,SWP_NOACTIVATE|SWP_NOMOVE|SWP_NOSIZE);
  if(queueWindow)recreateQueueWindow();relayoutPlayer();
 }
+static void createDesktopShortcut(bool on);
+static void setDesktopShortcut(bool on){
+ HRESULT co=CoInitializeEx(NULL,COINIT_APARTMENTTHREADED);
+ createDesktopShortcut(on);
+ if(SUCCEEDED(co))CoUninitialize();
+}
+static bool desktopShortcutWanted(void){
+ DWORD v=1,size=sizeof(v);
+ if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"DesktopShortcut",RRF_RT_REG_DWORD,NULL,&v,&size)!=ERROR_SUCCESS)return true;
+ return v!=0;
+}
+static void createDesktopShortcut(bool on){
+ DWORD value=on?1:0;RegSetKeyValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"DesktopShortcut",REG_DWORD,&value,sizeof(value));
+ PWSTR desktopPath=NULL;WCHAR link[MAX_PATH];
+ if(FAILED(SHGetKnownFolderPath(&FOLDERID_Desktop,0,NULL,&desktopPath)))return;
+ swprintf(link,MAX_PATH,L"%ls\\RMP.lnk",desktopPath);CoTaskMemFree(desktopPath);
+ if(!on){DeleteFileW(link);return;}
+ WCHAR exe[MAX_PATH];GetModuleFileNameW(NULL,exe,MAX_PATH);
+ IShellLinkW *shortcut=NULL;
+ if(FAILED(CoCreateInstance(&CLSID_ShellLink,NULL,CLSCTX_INPROC_SERVER,&IID_IShellLinkW,(void **)&shortcut)))return;
+ shortcut->lpVtbl->SetPath(shortcut,exe);shortcut->lpVtbl->SetDescription(shortcut,L"RMP - Rust Media Player");
+ shortcut->lpVtbl->SetIconLocation(shortcut,exe,0);
+ IPersistFile *file=NULL;
+ if(SUCCEEDED(shortcut->lpVtbl->QueryInterface(shortcut,&IID_IPersistFile,(void **)&file))){file->lpVtbl->Save(file,link,TRUE);file->lpVtbl->Release(file);}
+ shortcut->lpVtbl->Release(shortcut);
+}
 static INT_PTR CALLBACK preferencesProc(HWND d,UINT m,WPARAM w,LPARAM l){
  if(m==WM_INITDIALOG){
   SetWindowTextW(d,l?L"Customise Interface":L"Preferences");
   for(int i=0;i<THEME_COUNT;i++)SendDlgItemMessageW(d,231,CB_ADDSTRING,0,(LPARAM)names[i]);
   SendDlgItemMessageW(d,231,CB_SETCURSEL,skin,0);SetDlgItemInt(d,232,volumePercent,FALSE);
-  CheckDlgButton(d,233,topUI);CheckDlgButton(d,234,statusUI);CheckDlgButton(d,235,advancedUI);CheckDlgButton(d,236,dockUI);return TRUE;
+  CheckDlgButton(d,233,topUI);CheckDlgButton(d,234,statusUI);CheckDlgButton(d,235,advancedUI);CheckDlgButton(d,236,dockUI);CheckDlgButton(d,237,desktopShortcutWanted());return TRUE;
  }
  if(m==WM_COMMAND&&LOWORD(w)==IDOK){
   BOOL valid;UINT value=GetDlgItemInt(d,232,&valid,FALSE);if(!valid||value>100){MessageBoxW(d,L"Enter a volume from 0 to 100.",L"Preferences",MB_OK);return TRUE;}
@@ -109,6 +135,7 @@ static INT_PTR CALLBACK preferencesProc(HWND d,UINT m,WPARAM w,LPARAM l){
   DWORD flags=(topUI?1:0)|(statusUI?2:0)|(advancedUI?4:0)|(dockUI?8:0);
   RegSetKeyValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"InterfaceOptions",REG_DWORD,&flags,sizeof(flags));
   RegSetKeyValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"DefaultVolume",REG_DWORD,&value,sizeof(value));
+  setDesktopShortcut(IsDlgButtonChecked(d,237)==BST_CHECKED);
   if(choice>=0&&choice<THEME_COUNT)SendMessageW(mainwin,WM_COMMAND,THEME_FIRST+choice,0);
   applyViewFlags();EndDialog(d,IDOK);return TRUE;
  }

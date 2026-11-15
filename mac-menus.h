@@ -1,3 +1,18 @@
+// Desktop shortcut: a symlink to the installed app, on by default. Turned off in Tools > Desktop Shortcut.
+static BOOL desktopShortcutWanted(void){
+ id v=CFBridgingRelease(CFPreferencesCopyAppValue(CFSTR("DesktopShortcut"),CFSTR("io.github.kmthegamer2022.rmp")));
+ return v?[v boolValue]:YES;
+}
+static void setDesktopShortcut(BOOL on,NSString *app){
+ CFPreferencesSetAppValue(CFSTR("DesktopShortcut"),on?kCFBooleanTrue:kCFBooleanFalse,CFSTR("io.github.kmthegamer2022.rmp"));
+ CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));
+ NSFileManager *fm=NSFileManager.defaultManager;
+ NSString *link=[NSHomeDirectory() stringByAppendingPathComponent:@"Desktop/RMP.app"];
+ NSString *old=[fm destinationOfSymbolicLinkAtPath:link error:nil];
+ if(old)[fm removeItemAtPath:link error:nil];
+ else if([fm fileExistsAtPath:link])return;
+ if(on && app.length)[fm createSymbolicLinkAtPath:link withDestinationPath:app error:nil];
+}
 // Native AppKit menus. Engine-backed submenus are populated when opened so a
 // track, title or device appearing after playback starts is immediately usable.
 -(NSMenuItem *)command:(NSString *)title in:(NSMenu *)menu key:(NSString *)key value:(NSString *)value {
@@ -52,7 +67,7 @@
  [self command:@"Track Synchronization…" in:m key:@"sync" value:nil];
  for(NSArray *pair in @[@[@"Media Information",@"media-info"],@[@"Codec Information",@"codec-info"],@[@"VLM Configuration",@"vlm"],@[@"Program Guide",@"guide"],@[@"Messages",@"messages"],@[@"Plugins and Extensions",@"plugins"]])
   [self command:pair[0] in:m key:pair[1] value:nil];
- [m addItem:NSMenuItem.separatorItem];[self command:@"Customize Interface…" in:m key:@"customize" value:nil];[self command:@"Preferences…" in:m key:@"preferences" value:nil];
+ [m addItem:NSMenuItem.separatorItem];[self command:@"Customize Interface…" in:m key:@"customize" value:nil];[self command:@"Preferences…" in:m key:@"preferences" value:nil];[self command:@"Desktop Shortcut" in:m key:@"desktop-shortcut" value:nil].state=desktopShortcutWanted()?NSControlStateValueOn:NSControlStateValueOff;
  m=[self menu:@"View" parent:bar];[self command:@"Playlist" in:m key:@"playlist" value:nil].keyEquivalent=@"l";
  [self command:@"Docked Playlist" in:m key:@"docked" value:nil];[self command:@"Always on Top" in:m key:@"top" value:nil];
  [m addItem:NSMenuItem.separatorItem];[self command:@"Minimal Interface" in:m key:@"minimal" value:nil];
@@ -266,6 +281,7 @@
  if([key isEqual:@"recent"]){[self openLocation:value];return;}
  if([key isEqual:@"clear-recent"]){[NSUserDefaults.standardUserDefaults removeObjectForKey:@"RecentMedia"];return;}
  if([key isEqual:@"quit-end"]){quitAtEnd=!quitAtEnd;return;}
+ if([key isEqual:@"desktop-shortcut"]){BOOL on=!desktopShortcutWanted();setDesktopShortcut(on,NSBundle.mainBundle.bundlePath);sender.state=on?NSControlStateValueOn:NSControlStateValueOff;return;}
  if([key isEqual:@"record"] && recording){NSString *r=[self engineAction:@"record" value:@"stop"];if(r.length)[self menuNote:@"Record" detail:r];else recording=NO;return;}
  if([key isEqual:@"record"]||[key isEqual:@"convert"]||[key isEqual:@"snapshot"]){
   [self pickOutput:key title:sender.title extension:[key isEqual:@"snapshot"]?@"png":[key isEqual:@"record"]?@"ts":@"mp4"];return;}

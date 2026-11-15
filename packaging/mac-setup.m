@@ -5,11 +5,13 @@ int main(void){@autoreleasepool{
  a.informativeText=@"Install RMP in your Applications folder. Choose one theme to start with. You can change it anytime under View → Theme in the macOS menu bar.";
  NSArray *names=@[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac",@"Linux"];
  NSArray<NSNumber *> *tags=@[@5,@4,@0,@1,@2,@3,@6];
- NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,183)];
+ NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,216)];
  NSDictionary *prefs=[NSUserDefaults.standardUserDefaults persistentDomainForName:@"io.github.kmthegamer2022.rmp"];
  NSNumber *stored=prefs[@"PlayerTheme"];NSInteger selected=stored && stored.integerValue>=0 && stored.integerValue<(NSInteger)tags.count?stored.integerValue:5;
  NSMutableArray *buttons=[NSMutableArray new];
- for(NSInteger i=0;i<(NSInteger)tags.count;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,156-i*25,280,24);b.tag=tags[i].integerValue;b.state=b.tag==selected;[options addSubview:b];[buttons addObject:b];}
+ for(NSInteger i=0;i<(NSInteger)tags.count;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,186-i*25,280,24);b.tag=tags[i].integerValue;b.state=b.tag==selected;[options addSubview:b];[buttons addObject:b];}
+ NSButton *desk=[NSButton checkboxWithTitle:@"Put RMP on the Desktop" target:nil action:nil];desk.frame=NSMakeRect(0,4,280,24);
+ desk.state=(!prefs[@"DesktopShortcut"] || [prefs[@"DesktopShortcut"] boolValue])?NSControlStateValueOn:NSControlStateValueOff;[options addSubview:desk];
  a.accessoryView=options;[a addButtonWithTitle:@"Install"];[a addButtonWithTitle:@"Cancel"];if([a runModal]!=NSAlertFirstButtonReturn)return 0;
  NSFileManager *fm=NSFileManager.defaultManager;NSString *root=[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
  NSString *dest=[root stringByAppendingPathComponent:@"RMP.app"];
@@ -21,5 +23,9 @@ int main(void){@autoreleasepool{
  if(err){[fm removeItemAtPath:stage error:nil];[[NSAlert alertWithError:err]runModal];return 1;}
  for(NSButton *b in buttons)if(b.state==NSControlStateValueOn){if(b.tag!=6 || selected!=6)CFPreferencesSetAppValue(CFSTR("PreviousTheme"),(__bridge CFNumberRef)@(b.tag==6?selected:b.tag),CFSTR("io.github.kmthegamer2022.rmp"));
  CFPreferencesSetAppValue(CFSTR("PlayerTheme"),(__bridge CFNumberRef)@(b.tag),CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));break;}
+ CFPreferencesSetAppValue(CFSTR("DesktopShortcut"),desk.state==NSControlStateValueOn?kCFBooleanTrue:kCFBooleanFalse,CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));
+ NSString *link=[NSHomeDirectory() stringByAppendingPathComponent:@"Desktop/RMP.app"];
+ if([fm destinationOfSymbolicLinkAtPath:link error:nil])[fm removeItemAtPath:link error:nil];
+ if(desk.state==NSControlStateValueOn && ![fm fileExistsAtPath:link])[fm createSymbolicLinkAtPath:link withDestinationPath:dest error:nil];
  [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:dest]];return 0;
 }}
