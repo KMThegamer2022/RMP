@@ -75,23 +75,10 @@ impl Terminal {
         } else {
             self.resolve(arg)?
         };
-        let dir = std::fs::canonicalize(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let dir = local_directory(&path)?;
         if !dir.is_dir() {
             return Err(format!("{} is not a folder.", path.display()));
         }
-        // GetFullPathName and LibVLC expect ordinary drive paths. Rust's
-        // canonicalize returns a verbatim path even for a short local name.
-        #[cfg(windows)]
-        let dir = {
-            let raw = dir
-                .to_str()
-                .ok_or_else(|| "Unsupported folder name.".to_string())?;
-            let drive = raw.strip_prefix(r"\\?\").unwrap_or(raw);
-            if drive.as_bytes().get(1) != Some(&b':') {
-                return Err("Use a local drive folder.".into());
-            }
-            PathBuf::from(drive)
-        };
         self.cwd = dir;
         Ok(String::new())
     }
@@ -177,6 +164,24 @@ impl Terminal {
             if close_quote { "\"" } else { "" }
         )
     }
+}
+
+fn local_directory(path: &std::path::Path) -> Result<PathBuf, String> {
+    let dir = std::fs::canonicalize(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // GetFullPathName and LibVLC expect ordinary drive paths. Rust's
+    // canonicalize returns a verbatim path even for a short local name.
+    #[cfg(windows)]
+    let dir = {
+        let raw = dir
+            .to_str()
+            .ok_or_else(|| "Unsupported folder name.".to_string())?;
+        let drive = raw.strip_prefix(r"\\?\").unwrap_or(raw);
+        if drive.as_bytes().get(1) != Some(&b':') {
+            return Err("Use a local drive folder.".into());
+        }
+        PathBuf::from(drive)
+    };
+    Ok(dir)
 }
 
 fn starts_with_name(name: &str, prefix: &str) -> bool {
@@ -408,7 +413,7 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             std::fs::create_dir_all(&folder).unwrap();
-            let folder = folder.canonicalize().unwrap();
+            let folder = local_directory(&folder).unwrap();
             Self {
                 term: Terminal {
                     cwd: folder.clone(),
