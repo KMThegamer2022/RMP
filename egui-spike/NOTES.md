@@ -116,3 +116,53 @@ Hiding that child when nothing is loaded shows the cone (egui draws the cone PNG
 - Top row (name, status, Open) is absent in this theme, as in the shipping app. The spike opens files
   with Cmd+O or the Open dialog from there; it has no menu bar.
 - Status line text is not shown; the shipping default theme does not show it either.
+
+## Round 3: all themes, View → Theme, saved choice
+
+Screenshots: `screenshots/side-by-side-<slug>.png` (shipping on the left, spike on the right), with the
+single captures `shipping-<slug>.png` and `egui-spike-<slug>.png`. Slugs: `vlc`, `rmp-default`, `win10`,
+`win7`, `xp`, `mac`, `linux`. All captured at 900×570 content on the same fixture.
+
+- Themes come from `themes.h` (colours, radius, dark/light appearance). Shipping order and `PlayerTheme`
+  indices are kept: VLC=5, RMP Default=4, Windows 10/11=0, Windows 7=1, Windows XP=2, Mac=3, Linux=6.
+- View → Theme is an in-window egui menu. The choice is saved to
+  `~/Library/Application Support/RMP egui spike/theme.txt` and restored at launch.
+  `RMP_SPIKE_THEME=<slug>` overrides it for one run without saving (used for the screenshots).
+- The shipping app was driven with `-PlayerTheme <index>` as a command-line default, so its prefs were
+  not written.
+- Title bar: transparent, with the appearance (light or dark) and background colour from the theme.
+  Title shows `RMP — <file>`.
+- Seek, volume and clock work in each theme. Verified by CoreGraphics clicks in VLC (earlier round) and
+  XP (seek to about 0:18; volume knob moved). Other themes use the same `bar()` code path, but were not
+  clicked individually.
+
+### Differences by theme
+- Window translucency: shipping Windows 7 is translucent (aero), so the desktop shows through the top.
+  The spike is opaque.
+- Windows XP: silver and blue gradients are approximations. Buttons are circles with a flat silver
+  fill, not gradients. The shipping title bar is beige; the spike's matches that colour.
+- Windows 7: orb play button is a flat circle. The shipping bottom row is centred; the spike is left-aligned.
+- Windows 10/11 and Mac: flat fills match the colours; spacing and fonts are close but not exact.
+- Mac: button widths follow the text. Shipping uses system titles with a different weight.
+- RMP Default and Linux: colours match. Linux in the shipping app opens a separate terminal window and
+  hides the controls; the spike keeps the controls visible, so there is no terminal.
+- The paused RMP mark overlay and the idle "welcome" label are not drawn.
+- Menus: the spike has a small in-window menu bar (File, View). The shipping app uses the native macOS
+  menu bar, which is outside the window, so the spike's content starts about 22 pt lower.
+- Fonts are SF (via `SFNS.ttf`), not the system font API; glyph shapes differ slightly.
+
+### Still missing (in this order)
+1. **Menus**: the full native menu bar (File, Edit, View, Playback, Window, Help, plus the items each one holds in `ui.m`
+   and `mac-menus.h`). Only File → Open and View → Theme exist.
+2. **Library**: `mac-library.h` / `src/media_library.rs` (browse, remember, play from library).
+3. **Queue**: the queue popup, playlist open and save (`ap_playlist_save/load`), shuffle and repeat behaviour.
+   Repeat and shuffle buttons do nothing yet.
+4. **Terminal**: `mac-terminal.h`, `src/terminal.rs`, and the Linux skin's terminal window.
+5. **Preferences**: none yet, beyond the theme choice.
+6. **Keyboard shortcuts**: only Space (play/pause) and Cmd+O (open) exist. The shipping app's key equivalents
+   (`mac-menus.h`) are not mapped.
+
+### Not verified
+- Each theme's seek, volume and clock by clicks (only VLC and XP were clicked).
+- Stop, Previous, Next, Fullscreen, Queue, repeat and shuffle in every theme.
+- Audio output.
