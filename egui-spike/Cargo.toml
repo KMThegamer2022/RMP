@@ -1,0 +1,18 @@
+[package]
+name = "egui-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone crate: keeps egui out of the shipping rmp package and its Cargo.lock.
+[workspace]
+
+[dependencies]
+eframe = "0.37.0"
+raw-window-handle = "0.6.2"
+rfd = "0.18.0"
+
+# The engine itself: src/lib.rs at the repo root, compiled unchanged as this crate's library.
+# Making it the library root keeps its `crate::` paths valid.
+[lib]
+path = "../src/lib.rs"
