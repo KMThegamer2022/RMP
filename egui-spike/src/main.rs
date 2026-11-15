@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use egui_spike as engine;
 
 mod menus;
+mod terminal;
 use menus::Native;
 
 /// Text prompts raised by menu items (Open Network Stream…, Jump to Specific Time…).
@@ -45,6 +46,11 @@ const CLOCK_W: f32 = 84.0;
 const VOLUME_W: f32 = 85.0;
 const CONE_SIZE: f32 = 120.0;
 const CONE_PNG: &[u8] = include_bytes!("../../assets/vlc-cone.png");
+const LOGO_PNG: &[u8] = include_bytes!("../../assets/RMP.png");
+/// Size of the logo shown when paused or stopped (pausedMark in ui.m).
+const MARK_SIZE: f32 = 96.0;
+/// How long the fullscreen transport stays up after the mouse last moved (mac-fullscreen.h).
+const FLOAT_HIDE_SECS: f32 = 2.5;
 
 fn rgb(v: u32) -> Color32 {
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
@@ -184,6 +190,11 @@ struct App {
     recent: Vec<String>,
     prompt: Option<Prompt>,
     note: Option<(String, String)>,
+    /// Last mouse movement; the fullscreen transport shows for a while after it.
+    last_motion: std::time::Instant,
+    was_fullscreen: bool,
+    logo: Option<egui::TextureHandle>,
+    term: terminal::Terminal,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -241,6 +252,10 @@ impl App {
             recent: load_recent(),
             prompt: None,
             note: None,
+            last_motion: std::time::Instant::now(),
+            was_fullscreen: false,
+            logo: None,
+            term: terminal::Terminal::new(),
         }
     }
 
@@ -304,6 +319,9 @@ impl App {
 
     fn set_skin(&mut self, skin: Skin) {
         self.skin = skin;
+        if skin == Skin::Linux {
+            self.term.hidden = false; // showTerminal in ui.m: the terminal opens with the Linux skin
+        }
         save_skin(skin);
     }
 
@@ -647,6 +665,14 @@ impl eframe::App for App {
                 self.open_path(PathBuf::from(path));
             }
         }
+        if self.logo.is_none() {
+            if let Ok(img) = image::load_from_memory(LOGO_PNG) {
+                let img = img.to_rgba8();
+                let size = [img.width() as usize, img.height() as usize];
+                let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+                self.logo = Some(ctx.load_texture("rmp-logo", color, egui::TextureOptions::LINEAR));
+            }
+        }
         if self.cone.is_none() {
             if let Ok(img) = image::load_from_memory(CONE_PNG) {
                 let img = img.to_rgba8();
@@ -726,16 +752,29 @@ impl eframe::App for App {
                 .to_string();
         }
 
+        // Fullscreen hides the menu bar and the bars (mac-fullscreen.h). Mouse movement shows the transport.
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) || (fullscreen && !self.was_fullscreen) {
+            self.last_motion = std::time::Instant::now();
+        }
+        self.was_fullscreen = fullscreen;
+        let bare = fullscreen || skin == Skin::Linux; // arrangeChrome: bare = inFull || terminal
+        let pointer_at_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 6.0));
+        let show_float = fullscreen && skin != Skin::Linux
+            && (self.last_motion.elapsed().as_secs_f32() < FLOAT_HIDE_SECS || ctx.any_popup_open());
+
         // Menu bar (installPlayerMenus). Actions are collected and run after the bar is drawn.
         let mut picked: Vec<Native> = Vec::new();
         let mut notes: Vec<(String, String)> = Vec::new();
-        egui::Panel::top("menubar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                for (title, entries) in menus::menu_bar() {
-                    ui.menu_button(title, |ui| menus::render(ui, self, &entries, &mut picked, &mut notes));
-                }
+        if !fullscreen || pointer_at_top {
+            egui::Panel::top("menubar").show(ui, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    for (title, entries) in menus::menu_bar() {
+                        ui.menu_button(title, |ui| menus::render(ui, self, &entries, &mut picked, &mut notes));
+                    }
+                });
             });
-        });
+        }
         for (title, text) in notes {
             self.note = Some((title, text));
         }
@@ -758,31 +797,21 @@ impl eframe::App for App {
             _ => th.text,
         };
 
-        let has_top = skin != Skin::Vlc;
+        let has_top = skin != Skin::Vlc && !bare;
         let bottom_top = h - BUTTON_H - BOTTOM_INSET;
         let timeline_top = bottom_top - 6.0 - TIMELINE_H;
 
-        // Top row (ui.m `top`): name, status, Open Files…. Hidden in the VLC skin.
         let mut screen_top = 0.0;
         if has_top {
-            let top_rect = Rect::from_min_max(Pos2::new(INSET, 10.0), Pos2::new(w - INSET, 10.0 + BUTTON_H)).translate(origin);
-            let mut row = ui.new_child(egui::UiBuilder::new().max_rect(top_rect));
-            row.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                ui.add(egui::Label::new(egui::RichText::new("RMP").strong().size(18.0).color(ink)));
-                ui.add(egui::Label::new(egui::RichText::new(&self.status).size(12.0).color(ink)));
-                let open_w = text_width(ui, "Open Files…", 13.0) + 14.0;
-                let spacer = (top_rect.width() - open_w - 170.0).max(0.0);
-                ui.add_space(spacer);
-                if tbutton(ui, skin, &th, BtnSpec { caption: "Open Files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
-                    self.open_dialog(true);
-                }
-            });
-            screen_top = top_rect.bottom() + 10.0 - origin.y;
+            screen_top = 10.0 + BUTTON_H + 10.0;
         }
 
         // Screen: black, with the cone in the VLC skin while idle (ui.m `cone`).
-        let screen = Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin);
+        let screen = if bare {
+            full
+        } else {
+            Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin)
+        };
         // Panel backgrounds cover everything except the video screen, which stays clear so the video
         // layered beneath egui shows through.
         let above = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top()));
@@ -795,6 +824,10 @@ impl eframe::App for App {
             p.rect_filled(region, 0.0, th.panel);
             if skin == Skin::Seven {
                 vgradient(&p, full, &[(0.0, th.panel), (0.33, rgb(0xf2faff)), (0.66, rgb(0xa2c6e3)), (1.0, th.panel)]);
+            }
+            if skin == Skin::Modern {
+                // ThemeSurface: a light 58 pt header over the dark panel.
+                p.rect_filled(Rect::from_min_size(full.min, Vec2::new(w, 58.0)), 0.0, rgb(0xf5f5f5));
             }
             if skin == Skin::Xp {
                 vgradient(
@@ -813,12 +846,30 @@ impl eframe::App for App {
             Some(p) => (unsafe { engine::ap_index(p) }) < 0,
             None => true,
         };
+        // Top row (ui.m `top`): name, status, Open Files…. Hidden in the VLC skin.
+        if has_top {
+            let top_rect = Rect::from_min_max(Pos2::new(INSET, 10.0), Pos2::new(w - INSET, 10.0 + BUTTON_H)).translate(origin);
+            let mut row = ui.new_child(egui::UiBuilder::new().max_rect(top_rect));
+            row.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                ui.add(egui::Label::new(egui::RichText::new("RMP").strong().size(18.0).color(ink)));
+                ui.add(egui::Label::new(egui::RichText::new(&self.status).size(12.0).color(ink)));
+                let open_w = text_width(ui, "Open Files…", 13.0) + 14.0;
+                let spacer = (top_rect.width() - open_w - 170.0).max(0.0);
+                ui.add_space(spacer);
+                if tbutton(ui, skin, &th, BtnSpec { caption: "Open Files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
+                    self.open_dialog(true);
+                }
+            });
+        }
+
         // Black unless libvlc has a video output; that output draws into the layered view beneath egui.
         let has_video = match self.player() {
             Some(p) => unsafe { engine::ap_has_video(p) },
             None => false,
         };
-        if !has_video {
+        let linux_black = skin == Skin::Linux && !(has_video && state <= 4); // idleBlack in ui.m
+        if !has_video || linux_black {
             ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
         }
         match skin {
@@ -835,11 +886,26 @@ impl eframe::App for App {
                 egui::Image::new(cone).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(CONE_SIZE)));
             }
         }
+        // The VLC skin shows its cone when paused or stopped; other skins show the RMP logo. An idle
+        // screen in other skins shows the logo too (syncPausedMark in ui.m).
+        let paused_or_stopped = state == 4 || state == 5;
+        let mark = if skin == Skin::Vlc {
+            if paused_or_stopped && !idle { self.cone.as_ref() } else { None }
+        } else if paused_or_stopped || idle {
+            self.logo.as_ref()
+        } else {
+            None
+        };
+        if let Some(mark) = mark {
+            egui::Image::new(mark).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(MARK_SIZE)));
+        }
         if let Some(view) = &self.video_view {
             view.setHidden(idle);
         }
         self.place_video(screen);
 
+        // The timeline and transport rows are hidden in bare layouts (fullscreen and Linux).
+        if !bare {
         // Timeline row (ui.m `timeline`): seek bar + clock.
         let timeline_rect = Rect::from_min_max(Pos2::new(INSET, timeline_top), Pos2::new(w - INSET, timeline_top + TIMELINE_H)).translate(origin);
         let (t, d, seekable) = match self.player() {
@@ -969,6 +1035,21 @@ impl eframe::App for App {
                 _ => {}
             }
         }
+        }
+
+        if show_float {
+            self.draw_floating_transport(ui, &th, state);
+        }
+        if skin == Skin::Linux && !self.term.hidden {
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("rmp-terminal"),
+                egui::ViewportBuilder::default()
+                    .with_title("RMP Terminal")
+                    .with_inner_size([650.0, 300.0])
+                    .with_min_inner_size([400.0, 180.0]),
+                |ctx, _class| self.terminal_ui(ctx),
+            );
+        }
     }
 }
 
@@ -1062,6 +1143,188 @@ fn bundled_resource(name: &str) -> Option<PathBuf> {
     }
     candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join(name));
     candidates.into_iter().find(|p| p.is_file())
+}
+
+impl App {
+    /// Floating transport shown in fullscreen (showFloatingTransport in mac-fullscreen.h): seek bar,
+    /// Previous, Play/Pause, Next, volume, and Exit Full Screen.
+    fn draw_floating_transport(&mut self, ui: &mut egui::Ui, th: &Theme, state: i32) {
+        let ctx = ui.ctx().clone();
+        let (t, d, seekable) = match self.player() {
+            Some(p) => unsafe { (engine::ap_time(p), engine::ap_length(p), engine::ap_seekable(p)) },
+            None => (0, 0, false),
+        };
+        let mut seek_to: Option<i64> = None;
+        let mut actions: Vec<Item> = Vec::new();
+        let mut exit = false;
+        egui::Area::new(egui::Id::new("floating-transport"))
+            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -28.0))
+            .order(egui::Order::Foreground)
+            .show(&ctx, |ui| {
+                egui::Frame::new()
+                    .fill(Color32::from_black_alpha(190))
+                    .corner_radius(10.0)
+                    .inner_margin(egui::Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width(526.0);
+                        let frac = if d > 0 { (t as f64 / d as f64).clamp(0.0, 1.0) } else { 0.0 };
+                        let (pointer, released) = bar(ui, frac, seekable && d > 0, 500.0, th);
+                        if let Some(f) = pointer {
+                            if released {
+                                seek_to = Some((f * d as f64) as i64);
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            let play_icon = if (1..=3).contains(&state) { Icon::Pause } else { Icon::Play };
+                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Previous", size: 13.0, icon: Some(Icon::Prev), width: 68.0, open: false }).clicked() {
+                                actions.push(Item::Prev);
+                            }
+                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Play", size: 17.0, icon: Some(play_icon), width: 52.0, open: false }).clicked() {
+                                actions.push(Item::Play);
+                            }
+                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Next", size: 13.0, icon: Some(Icon::Next), width: 44.0, open: false }).clicked() {
+                                actions.push(Item::Next);
+                            }
+                            let mut vol = self.volume;
+                            let (pointer, _) = bar(ui, vol as f64 / 100.0, true, 110.0, th);
+                            if let Some(f) = pointer {
+                                vol = (f * 100.0).round() as i32;
+                                self.set_volume(vol);
+                            }
+                            let exit_w = text_width(ui, "Exit Full Screen", 13.0) + 14.0;
+                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Exit Full Screen", size: 13.0, icon: None, width: exit_w, open: false }).clicked() {
+                                exit = true;
+                            }
+                        });
+                    });
+            });
+        if let Some(ms) = seek_to {
+            if let Some(p) = self.player() {
+                unsafe { engine::ap_seek(p, ms) };
+            }
+        }
+        for item in actions {
+            match item {
+                Item::Play => self.toggle(),
+                Item::Prev => self.step(-1),
+                Item::Next => self.step(1),
+                _ => {}
+            }
+        }
+        if exit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+    }
+
+    /// The RMP Terminal window (mac-terminal.h): transcript, prompt, history, Tab completion.
+    fn terminal_ui(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested()) {
+            self.term.hidden = true;
+            return;
+        }
+        if !self.term.started {
+            self.term.started = true;
+            self.term.lines.push(("RMP Terminal\nType help to list commands.\n".into(), terminal::INK));
+            self.term.prompt = terminal::prompt(self.player as *mut c_void);
+        }
+        let player = self.player as *mut c_void;
+        egui::Area::new(egui::Id::new("terminal-root")).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
+            ui.set_min_size(ctx.content_rect().size());
+            egui::Frame::new().fill(terminal::BACKGROUND).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
+                let height = (ui.available_height() - 30.0).max(40.0);
+                egui::ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .max_height(height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (text, color) in &self.term.lines {
+                            ui.label(egui::RichText::new(text.trim_end_matches('\n')).monospace().size(13.0).color(*color));
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(self.term.prompt.clone()).monospace().size(13.0).color(terminal::PROMPT_INK));
+                    let edit = egui::TextEdit::singleline(&mut self.term.input)
+                        .font(FontId::monospace(13.0))
+                        .text_color(terminal::INK)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(f32::INFINITY);
+                    let resp = ui.add(edit);
+                    resp.request_focus();
+                });
+                let (enter, tab, up, down) = ctx.input(|i| {
+                    (
+                        i.key_pressed(egui::Key::Enter),
+                        i.key_pressed(egui::Key::Tab),
+                        i.key_pressed(egui::Key::ArrowUp),
+                        i.key_pressed(egui::Key::ArrowDown),
+                    )
+                });
+                if enter {
+                    self.terminal_submit(ctx, player);
+                }
+                if tab && !self.term.input.is_empty() {
+                    let candidate = terminal::complete(player, &self.term.input);
+                    if !candidate.is_empty() {
+                        self.term.input = candidate;
+                    }
+                }
+                if up && self.term.history_index > 0 {
+                    if self.term.history_index == self.term.history.len() {
+                        self.term.draft = self.term.input.clone();
+                    }
+                    self.term.history_index -= 1;
+                    self.term.input = self.term.history[self.term.history_index].clone();
+                }
+                if down && self.term.history_index < self.term.history.len() {
+                    self.term.history_index += 1;
+                    self.term.input = if self.term.history_index == self.term.history.len() {
+                        self.term.draft.clone()
+                    } else {
+                        self.term.history[self.term.history_index].clone()
+                    };
+                }
+            });
+        });
+    }
+
+    /// Runs the typed line (submitTerminalLine in mac-terminal.h).
+    fn terminal_submit(&mut self, ctx: &egui::Context, player: *mut c_void) {
+        let line = std::mem::take(&mut self.term.input);
+        if line.is_empty() {
+            return;
+        }
+        if self.term.history.last() != Some(&line) {
+            self.term.history.push(line.clone());
+            if self.term.history.len() > 200 {
+                self.term.history.remove(0);
+            }
+        }
+        self.term.history_index = self.term.history.len();
+        self.term.draft.clear();
+        self.term.lines.push((format!("{} ", self.term.prompt), terminal::PROMPT_INK));
+        self.term.lines.push((format!("{line}\n"), terminal::INK));
+        let (output, action) = terminal::command(player, &line);
+        if action == 2 {
+            self.term.lines.clear();
+        }
+        if !output.is_empty() {
+            let text = if output.ends_with('\n') { output } else { format!("{output}\n") };
+            self.term.lines.push((text, terminal::INK));
+        }
+        self.term.prompt = terminal::prompt(player);
+        match action {
+            9 => self.set_skin(Skin::Vlc),
+            10..=16 => {
+                if let Some(k) = SKINS.into_iter().find(|k| k.index() == action - 10) {
+                    self.set_skin(k);
+                }
+            }
+            1 => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true)),
+            4 => self.volume = terminal::volume(player),
+            _ => {}
+        }
+    }
 }
 
 fn prompt_kind(title: &str) -> bool {

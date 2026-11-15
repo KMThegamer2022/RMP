@@ -207,3 +207,36 @@ Quit, About) are in the spike.
 
 ### Still missing
 - Media library, queue, terminal, preferences, keyboard shortcut customisation.
+
+## Round 5: Linux theme, stopped logo, fullscreen
+
+Screenshots: `screenshots/round5/`.
+
+### Linux theme (ui.m `arrangeChrome`, mac-terminal.h)
+- Layout is bare: the screen fills the window, with no top row, timeline or transport. The menu bar stays.
+- Black screen unless a video frame is playing (`idleBlack`). The RMP logo shows when stopped.
+- RMP Terminal opens as its own window with the Linux skin. It runs the engine's `ap_terminal_*` calls:
+  command input, output, prompt, history (Up/Down), Tab completion, and actions (clear, fullscreen, theme,
+  volume). The welcome text and prompt match `mac-terminal.h`.
+- Verified by running: black screen with video playing; `help` lists the shipping commands; `stop`
+  prints "Stopped." and shows the logo.
+- Not verified: `theme`, `volume`, `queue`, `seek`, and history and Tab completion by typing.
+- Difference: the windowed Linux layout has no seek or volume controls, matching the shipping bare layout.
+
+### Stopped / paused mark (syncPausedMark)
+- VLC skin shows the cone (96 pt) when paused or stopped with a file loaded; idle shows the 120 pt cone.
+- Other skins show the RMP logo (96 pt) when paused, stopped, or idle.
+- Verified by running: VLC stopped (cone), Windows 10/11 stopped (logo), Linux stopped (logo).
+
+### Fullscreen (mac-fullscreen.h)
+- Fullscreen hides the menu bar, the top row, the timeline and the transport. The screen fills the window.
+- A floating transport (seek, Previous, Play/Pause, Next, volume, Exit Full Screen) shows for 2.5 s after the
+  mouse moves. The menu bar shows again when the pointer is at the top edge.
+- Verified by running: transport visible after mouse movement; hidden after 2.5 s without movement.
+- Not verified: Ctrl+Cmd+F in the spike (the keystroke did not reach the window in the test); the
+  top-edge menu reveal; Exit Full Screen button.
+- Linux fullscreen shows no floating transport, as in the shipping code (`refreshFloating` returns for Linux).
+
+### Known issues
+- AppKit logs "adding an unknown subview" when the video view is attached to the frame view. The
+  layering still works.
