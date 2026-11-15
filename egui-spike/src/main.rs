@@ -99,6 +99,17 @@ const BOTTOM_INSET: f32 = 12.0;
 const CLOCK_W: f32 = 84.0;
 const VOLUME_W: f32 = 85.0;
 const CONE_SIZE: f32 = 120.0;
+/// Height of the media header and width of the sidebar in the XP and Windows 7 layouts (mac-library.h).
+const MEDIA_HEADER_H: f32 = 58.0;
+const MEDIA_SIDEBAR_W: f32 = 133.0;
+
+/// Pages of the XP and Windows 7 media layout (the sidebar buttons).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum MediaPage {
+    NowPlaying,
+    Library,
+    Playlist,
+}
 const CONE_PNG: &[u8] = include_bytes!("../../assets/vlc-cone.png");
 const LINK_TARGET: &str = "https://www.youtube.com/watch?v=yEh_4GqXqFc";
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/RMP.png");
@@ -247,6 +258,8 @@ struct App {
     settings: Settings,
     dialog: Option<Dialog>,
     show_queue: bool,
+    media_page: MediaPage,
+    library_search: String,
     prompt: Option<Prompt>,
     note: Option<(String, String)>,
     /// Last mouse movement; the fullscreen transport shows for a while after it.
@@ -313,6 +326,8 @@ impl App {
             settings: load_settings(),
             dialog: None,
             show_queue: false,
+            media_page: MediaPage::NowPlaying,
+            library_search: String::new(),
             prompt: None,
             note: None,
             last_motion: std::time::Instant::now(),
@@ -862,7 +877,10 @@ impl eframe::App for App {
             _ => th.text,
         };
 
-        let has_top = skin != Skin::Vlc && !bare;
+        // The XP and Windows 7 layouts have a media header and sidebar instead of the top row.
+        let media = matches!(skin, Skin::Xp | Skin::Seven) && !bare;
+        let media_video = !media || self.media_page == MediaPage::NowPlaying;
+        let has_top = skin != Skin::Vlc && !bare && !media;
         let bottom_top = h - BUTTON_H - BOTTOM_INSET;
         let timeline_top = bottom_top - 6.0 - TIMELINE_H;
 
@@ -870,18 +888,33 @@ impl eframe::App for App {
         if has_top {
             screen_top = 10.0 + BUTTON_H + 10.0;
         }
+        if media {
+            screen_top = MEDIA_HEADER_H;
+        }
+        let screen_left = if media { MEDIA_SIDEBAR_W } else { 0.0 };
 
         // Screen: black, with the cone in the VLC skin while idle (ui.m `cone`).
         let screen = if bare {
             full
         } else {
-            Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin)
+            Rect::from_min_max(Pos2::new(screen_left, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin)
         };
         // Panel backgrounds cover everything except the video screen, which stays clear so the video
         // layered beneath egui shows through.
         let above = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top()));
         let below = Rect::from_min_max(Pos2::new(full.left(), screen.bottom()), full.max);
-        for region in [above, below] {
+        let mut regions = vec![above, below];
+        if media {
+            // The sidebar, and the content area when it is not showing video, are panel-coloured too.
+            regions.push(Rect::from_min_max(
+                Pos2::new(full.left(), screen.top()),
+                Pos2::new(full.left() + MEDIA_SIDEBAR_W, screen.bottom()),
+            ));
+            if !media_video {
+                regions.push(screen);
+            }
+        }
+        for region in regions {
             if region.height() <= 0.0 {
                 continue;
             }
@@ -928,15 +961,20 @@ impl eframe::App for App {
             });
         }
 
+        if media {
+            self.draw_media_layout(ui, &ctx, &th, ink, full, timeline_top - 6.0);
+        }
+
         // Black unless libvlc has a video output; that output draws into the layered view beneath egui.
         let has_video = match self.player() {
             Some(p) => unsafe { engine::ap_has_video(p) },
             None => false,
         };
         let linux_black = skin == Skin::Linux && !(has_video && state <= 4); // idleBlack in ui.m
-        if !has_video || linux_black {
+        if media_video && (!has_video || linux_black) {
             ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
         }
+        if media_video {
         match skin {
             Skin::Seven => {
                 ui.painter().rect_stroke(screen, 0.0, Stroke::new(2.0, rgb(0x829db5)), egui::StrokeKind::Inside);
@@ -964,10 +1002,13 @@ impl eframe::App for App {
         if let Some(mark) = mark {
             egui::Image::new(mark).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(MARK_SIZE)));
         }
-        if let Some(view) = &self.video_view {
-            view.setHidden(idle);
         }
-        self.place_video(screen);
+        if let Some(view) = &self.video_view {
+            view.setHidden(idle || !media_video);
+        }
+        if media_video {
+            self.place_video(screen);
+        }
 
         // The timeline and transport rows are hidden in bare layouts (fullscreen and Linux).
         if !bare {
@@ -1140,6 +1181,181 @@ impl App {
             Native::OpenStream => self.prompt = Some(Prompt::Stream(String::new())),
             Native::TimeJump => self.prompt = Some(Prompt::Time(String::new())),
             _ => {}
+        }
+    }
+
+    /// Names of the library items (file names, as the shipping library shows them).
+    fn library_names(&mut self) -> Vec<String> {
+        let Some(p) = self.player() else { return Vec::new() };
+        let count = unsafe { engine::ap_library_count(p) };
+        (0..count)
+            .map(|i| {
+                let raw = unsafe { engine::ap_library_item(p, i) };
+                if raw.is_null() {
+                    return String::new();
+                }
+                let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+                path.rsplit('/').next().unwrap_or(&path).to_string()
+            })
+            .collect()
+    }
+
+    /// The XP and Windows 7 media layout (mac-library.h): header with title, search and Open files,
+    /// a sidebar with the pages and playlist buttons, and the page content.
+    fn draw_media_layout(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, th: &Theme, ink: Color32, full: Rect, media_bottom: f32) {
+        let header = Rect::from_min_size(full.min, Vec2::new(full.width(), MEDIA_HEADER_H));
+        let bottom = full.min.y + media_bottom;
+        let sidebar = Rect::from_min_max(
+            Pos2::new(full.left(), header.bottom()),
+            Pos2::new(full.left() + MEDIA_SIDEBAR_W, bottom),
+        );
+        let content = Rect::from_min_max(Pos2::new(full.left() + MEDIA_SIDEBAR_W, header.bottom()), Pos2::new(full.right(), bottom));
+
+        // Header: title on the left; search and Open files… on the right.
+        let mut head = ui.new_child(egui::UiBuilder::new().max_rect(header.shrink2(Vec2::new(16.0, 14.0))));
+        let open_w = text_width(&head, "Open files…", 13.0) + 14.0;
+        let mut open_clicked = false;
+        head.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ui.add(egui::Label::new(egui::RichText::new("Media Library").strong().size(15.0).color(ink)));
+            let search_w = 170.0;
+            let spacer = (header.width() - 32.0 - 150.0 - open_w - search_w - 8.0).max(0.0);
+            ui.add_space(spacer);
+            ui.add(egui::TextEdit::singleline(&mut self.library_search).hint_text("Search").desired_width(search_w));
+            if tbutton(ui, self.skin, th, BtnSpec { caption: "Open files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
+                open_clicked = true;
+            }
+        });
+        if open_clicked {
+            self.open_dialog(true);
+        }
+
+        // Sidebar: the three pages, then the playlist buttons.
+        let mut side_actions: Vec<Native> = Vec::new();
+        let mut side = ui.new_child(egui::UiBuilder::new().max_rect(sidebar.shrink2(Vec2::new(8.0, 12.0))));
+        side.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 6.0;
+            for (label, page) in [
+                ("Now Playing", MediaPage::NowPlaying),
+                ("Library", MediaPage::Library),
+                ("Current Playlist", MediaPage::Playlist),
+            ] {
+                if ui.selectable_label(self.media_page == page, label).clicked() {
+                    self.media_page = page;
+                }
+            }
+            ui.add_space(14.0);
+            if ui.add(egui::Button::new("Open playlist…").frame(false)).clicked() {
+                side_actions.push(Native::OpenPlaylist);
+            }
+            if ui.add(egui::Button::new("Save playlist…").frame(false)).clicked() {
+                side_actions.push(Native::SavePlaylist);
+            }
+        });
+        for action in side_actions {
+            self.run_native(action, ctx);
+        }
+
+        // Content: Now Playing shows the video screen (drawn by the caller); the other pages draw here.
+        let mut body = ui.new_child(egui::UiBuilder::new().max_rect(content.shrink(12.0)));
+        match self.media_page {
+            MediaPage::NowPlaying => {}
+            MediaPage::Library => self.draw_library(&mut body, th),
+            MediaPage::Playlist => self.draw_playlist(&mut body),
+        }
+    }
+
+    /// The library table: Title, Album, Artist, Length, with search. Double-click plays the item.
+    /// Album, artist and length need the engine's metadata, which the spike does not read yet.
+    fn draw_library(&mut self, ui: &mut egui::Ui, th: &Theme) {
+        let query = self.library_search.trim().to_lowercase();
+        let rows: Vec<(usize, String)> = self
+            .library_names()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
+            .collect();
+        let width = ui.available_width();
+        let fractions = [0.5f32, 0.2, 0.2, 0.1];
+        let names = ["Title", "Album", "Artist", "Length"];
+        ui.label(egui::RichText::new("All media").strong().size(13.0).color(th.text));
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for (name, frac) in names.iter().zip(fractions) {
+                ui.add_sized(
+                    [width * frac, 20.0],
+                    egui::Label::new(egui::RichText::new(*name).size(12.0).strong().color(th.text)),
+                );
+            }
+        });
+        let mut play: Option<usize> = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, 22.0, rows.len(), |ui, range| {
+            for row in range {
+                let (index, name) = &rows[row];
+                let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, 0.0, th.accent.gamma_multiply(0.25));
+                }
+                let mut x = rect.left();
+                for (i, frac) in fractions.iter().enumerate() {
+                    let text = if i == 0 { name.as_str() } else { "" };
+                    let cell = Rect::from_min_size(Pos2::new(x + 4.0, rect.top()), Vec2::new(width * frac - 8.0, rect.height()));
+                    ui.painter().text(
+                        cell.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        text,
+                        FontId::new(12.0, FontFamily::Proportional),
+                        th.text,
+                    );
+                    x += width * frac;
+                }
+                if resp.double_clicked() {
+                    play = Some(*index);
+                }
+            }
+        });
+        if let Some(i) = play {
+            if let Some(p) = self.player() {
+                unsafe { engine::ap_library_play(p, i) };
+            }
+        }
+    }
+
+    /// The current playlist as a page: clicking an item plays it.
+    fn draw_playlist(&mut self, ui: &mut egui::Ui) {
+        let items: Vec<String> = match self.player() {
+            Some(p) => {
+                let count = unsafe { engine::ap_count(p) };
+                (0..count)
+                    .map(|i| {
+                        let raw = unsafe { engine::ap_item(p, i) };
+                        if raw.is_null() {
+                            return String::new();
+                        }
+                        let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+                        path.rsplit('/').next().unwrap_or(&path).to_string()
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        let current = self.player().map(|p| unsafe { engine::ap_index(p) }).unwrap_or(-1);
+        let mut play: Option<usize> = None;
+        ui.label(egui::RichText::new("Current playlist").strong().size(13.0));
+        if items.is_empty() {
+            ui.label("The playlist is empty.");
+        }
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for (i, name) in items.iter().enumerate() {
+                if ui.selectable_label(current == i as isize, format!("{}. {}", i + 1, name)).clicked() {
+                    play = Some(i);
+                }
+            }
+        });
+        if let Some(i) = play {
+            if let Some(p) = self.player() {
+                unsafe { engine::ap_play(p, i) };
+            }
         }
     }
 
