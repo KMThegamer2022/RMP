@@ -1,5 +1,8 @@
 -(void)windowDidEnterFullScreen:(NSNotification *)note {
- inFull=YES;[self arrangeChrome];
+ inFull=YES;[self arrangeChrome];if(skin!=LINUX_THEME)[self showFloatingTransport];
+}
+-(void)showFloatingTransport {
+ if(panel){[panel orderFront:nil];return;}
  panel=[[NSPanel alloc]initWithContentRect:NSMakeRect(0,0,550,76) styleMask:NSWindowStyleMaskBorderless|NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
  panel.releasedWhenClosed=NO;panel.opaque=NO;panel.backgroundColor=NSColor.clearColor;
  panel.collectionBehavior=NSWindowCollectionBehaviorFullScreenAuxiliary;
@@ -19,7 +22,7 @@
 -(void)floatSeek:(NSSlider *)s {ap_seek(p,s.doubleValue*ap_length(p));}
 -(void)floatVolume:(NSSlider *)s {volume.doubleValue=s.doubleValue;[self changeVolume:s];}
 -(void)refreshFloating {
- if(!panel)return;fp.title=play.title;fs.enabled=seek.enabled;fs.doubleValue=seek.doubleValue;fv.doubleValue=volume.doubleValue;
+ if(!panel||skin==LINUX_THEME)return;fp.title=play.title;fs.enabled=seek.enabled;fs.doubleValue=seek.doubleValue;fv.doubleValue=volume.doubleValue;
  NSPoint point=NSEvent.mouseLocation;double now=NSProcessInfo.processInfo.systemUptime;
  if(!NSEqualPoints(point,lastPointer)||(panel.visible&&NSPointInRect(point,panel.frame))){
  lastActivity=now;if(!panel.visible)[panel orderFront:nil];

@@ -15,6 +15,11 @@ extern const char *ap_item(Player *,size_t);
 extern size_t ap_library_count(Player *);
 extern const char *ap_library_item(Player *,size_t);
 extern bool ap_library_play(Player *,size_t),ap_playlist_save(Player *,const char *),ap_playlist_load(Player *,const char *);
+extern char *ap_terminal_command(Player *,const char *,int *);
+extern char *ap_terminal_complete(Player *,const char *);
+extern char *ap_terminal_prompt(Player *);
+extern int ap_terminal_volume(Player *);
+extern void ap_terminal_free(char *);
 extern bool ap_has_video(Player *);
 extern int ap_state(Player *);
 extern int64_t ap_time(Player *),ap_length(Player *);
@@ -22,7 +27,11 @@ extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool)
 
 @interface PlayerApp : NSObject<NSApplicationDelegate,NSMenuDelegate,NSWindowDelegate,NSTableViewDataSource,NSTableViewDelegate,NSSearchFieldDelegate>{
  Player *p;
- NSWindow *window;
+ NSWindow *window,*terminalWindow;
+ NSMenuItem *playMenuItem;
+ NSScrollView *terminalScroll;NSLayoutConstraint *terminalTextHeight;NSTextView *terminalTranscript;NSTextField *terminalInput,*terminalPrompt;
+ NSMutableArray<NSString *> *terminalHistory;NSUInteger terminalHistoryIndex;NSString *terminalDraft;
+ NSView *idleBlack;
  NSVisualEffectView *aeroDeck;
  NSView *screen;
  NSTextField *name,*status,*clockLabel,*welcome;
@@ -82,14 +91,14 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [edit addItemWithTitle:s action:NSSelectorFromString(@[@"cut:",@"copy:",@"paste:",@"selectAll:"][n]) keyEquivalent:keys[n]];
  }
  NSMenu *media=[self menu:@"Playback" parent:bar];
- [self item:media title:@"Play / Pause" action:@selector(toggle:) key:@" "].keyEquivalentModifierMask=0;
+ playMenuItem=[self item:media title:@"Play / Pause" action:@selector(toggle:) key:@" "];playMenuItem.keyEquivalentModifierMask=0;
  [self item:media title:@"Previous Item" action:@selector(prev:) key:@"["];
  [self item:media title:@"Next Item" action:@selector(next:) key:@"]"];
  [self item:media title:@"Toggle Full Screen" action:@selector(full:) key:@"f"].keyEquivalentModifierMask=NSEventModifierFlagControl|NSEventModifierFlagCommand;
  queue=[self menu:@"Queue" parent:bar];audio=[self menu:@"Audio Track" parent:bar];subs=[self menu:@"Subtitles" parent:bar];
  themeMenu=[self menu:@"Theme" parent:bar];
- for(NSString *title in @[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"]){
- NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];entry.tag=themeMenu.numberOfItems==1?VLC_THEME:themeMenu.numberOfItems==2?RMP_DEFAULT:themeMenu.numberOfItems-3;
+ for(NSString *title in @[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac",@"Linux"]){
+ NSMenuItem *entry=[self item:themeMenu title:title action:@selector(pickTheme:) key:@""];const NSInteger ids[]={VLC_THEME,RMP_DEFAULT,MODERN,SEVEN,XP,MAC,LINUX_THEME};entry.tag=ids[themeMenu.numberOfItems-1];
  }
  queue.delegate=self;audio.delegate=self;subs.delegate=self;
 }
@@ -104,13 +113,14 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  if(v!=screen)for(NSView *child in v.subviews)[self styleView:child];
 }
 #include "mac-library.h"
+#include "mac-terminal.h"
 -(void)arrangeChrome {
- BOOL edge=inFull||skin==VLC_THEME;
+ BOOL terminal=skin==LINUX_THEME;BOOL edge=inFull||skin==VLC_THEME||terminal;
  mediaTop.active=NO;normalTop.active=NO;edgeTop.active=NO;normalBottom.active=NO;edgeBottom.active=NO;
- if(edge)edgeTop.active=YES;else if(![self hasMediaLayout])normalTop.active=YES;(inFull?edgeBottom:normalBottom).active=YES;
- top.hidden=edge||[self hasMediaLayout];timeline.hidden=inFull;bottom.hidden=inFull;
+ if(edge)edgeTop.active=YES;else if(![self hasMediaLayout])normalTop.active=YES;((inFull||terminal)?edgeBottom:normalBottom).active=YES;
+ top.hidden=edge||[self hasMediaLayout];timeline.hidden=inFull||terminal;bottom.hidden=inFull||terminal;
  [self layoutMediaChrome];
- cone.hidden=skin!=VLC_THEME||(p&&ap_index(p)>=0);welcome.hidden=skin==VLC_THEME||(p&&ap_index(p)>=0);
+ cone.hidden=skin!=VLC_THEME||(p&&ap_index(p)>=0);welcome.hidden=terminal||skin==VLC_THEME||(p&&ap_index(p)>=0);
 }
 -(void)applyTheme:(NSInteger)value {
  NSInteger oldSkin=skin;
@@ -143,6 +153,9 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  NSStackView *row=(NSStackView *)v;row.spacing=skin==SEVEN?2:skin==MODERN?18:8;
  }
 
+ idleBlack.hidden=skin!=LINUX_THEME || (p && ap_has_video(p) && ap_state(p)<=4);
+ if(skin==LINUX_THEME){[self showTerminal:nil];if(panel)[panel orderOut:nil];}
+ else if(oldSkin==LINUX_THEME){[terminalWindow orderOut:nil];[window makeKeyAndOrderFront:nil];if(inFull)[self showFloatingTransport];}
  for(NSMenuItem *entry in themeMenu.itemArray)entry.state=entry.tag==skin?NSControlStateValueOn:NSControlStateValueOff;
 }
 -(void)pickTheme:(NSMenuItem *)entry {
@@ -199,6 +212,8 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  aeroDeck.blendingMode=NSVisualEffectBlendingModeBehindWindow;aeroDeck.state=NSVisualEffectStateActive;
  [root addSubview:aeroDeck positioned:NSWindowBelow relativeTo:timeline];aeroDeck.translatesAutoresizingMaskIntoConstraints=NO;
  [NSLayoutConstraint activateConstraints:@[[aeroDeck.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],[aeroDeck.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],[aeroDeck.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],[aeroDeck.topAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
+ idleBlack=[NSView new];idleBlack.wantsLayer=YES;idleBlack.layer.backgroundColor=NSColor.blackColor.CGColor;idleBlack.translatesAutoresizingMaskIntoConstraints=NO;
+ [root addSubview:idleBlack positioned:NSWindowAbove relativeTo:screen];[NSLayoutConstraint activateConstraints:@[[idleBlack.leadingAnchor constraintEqualToAnchor:screen.leadingAnchor],[idleBlack.trailingAnchor constraintEqualToAnchor:screen.trailingAnchor],[idleBlack.topAnchor constraintEqualToAnchor:screen.topAnchor],[idleBlack.bottomAnchor constraintEqualToAnchor:screen.bottomAnchor]]];
  [self buildMediaLayout:root];mediaTop=[screen.topAnchor constraintEqualToAnchor:mediaHeader.bottomAnchor];
  [NSUserDefaults.standardUserDefaults registerDefaults:@{@"PlayerTheme":@(VLC_THEME)}];
  [self applyTheme:[NSUserDefaults.standardUserDefaults integerForKey:@"PlayerTheme"]];
@@ -207,7 +222,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  [self rebuildMediaRows];[window makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
  timer=[NSTimer scheduledTimerWithTimeInterval:0.2 target:self selector:@selector(refresh:) userInfo:nil repeats:YES];
  if(pending.count){[self accept:pending];pending=nil;}
- [self refresh:nil];
+ [self refresh:nil];if(skin==LINUX_THEME)[self showTerminal:nil];
  checkMacUpdates(NO);
 }
 -(void)application:(NSApplication *)app openURLs:(NSArray<NSURL *> *)urls{
@@ -229,6 +244,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
 }
 -(void)refresh:(id)sender{
  int state=ap_state(p);
+ if(skin==LINUX_THEME)idleBlack.hidden=state>=1&&state<=4&&ap_has_video(p);
  if(pendingVideoSwitch && ap_has_video(p)){pendingVideoSwitch=NO;mediaPage=0;[self arrangeChrome];}
  if(state>=6)pendingVideoSwitch=NO;
  if(state==6 && previous!=6 && repeatOne){[self launch:ap_index(p)];return;}
