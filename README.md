@@ -1,52 +1,146 @@
+<div align="center">
+
+<img src="assets/RMP.png" width="128" alt="RMP icon">
+
 # RMP · Rust Media Player
 
-<img src="assets/RMP.png" width="120" alt="RMP icon">
+**A fast, standalone media player for Apple Silicon Macs and Windows x64.**
+Built on a Rust playback core and libVLC, with native interfaces on each platform.
 
-Download the packaged app from [GitHub Releases](https://github.com/KMThegamer2022/RMP/releases).
-RMP is a standalone media player for Apple Silicon Macs and Windows x64. Choose **Media → Open File** for one item or **Open Multiple Files** to add several. View → Playlist shows the playback order. Media → Open Network Stream accepts a direct media URL. Audio and Subtitle list tracks provided by the current media.
+[![Latest release](https://img.shields.io/github/v/release/KMThegamer2022/RMP?style=for-the-badge&color=ff3c00)](https://github.com/KMThegamer2022/RMP/releases/latest)
+[![Windows build](https://img.shields.io/github/actions/workflow/status/KMThegamer2022/RMP/windows.yml?style=for-the-badge&label=Windows%20build)](https://github.com/KMThegamer2022/RMP/actions/workflows/windows.yml)
 
-Space toggles playback. Command-O opens files, Command-U opens a stream, Command-[ and Command-] change queue items, and Control-Command-F toggles full screen.
+[**Download RMP**](https://github.com/KMThegamer2022/RMP/releases/latest) · [All releases](https://github.com/KMThegamer2022/RMP/releases)
 
-## Build
+</div>
 
-On an Apple Silicon Mac, install a recent stable Rust toolchain, Xcode Command Line Tools and an arm64 VLC 3.0.x application at /Applications/VLC.app. Run `./build.sh` to create build/RMP.app. Set VLC_APP to use another VLC bundle, or pass an absolute output app path as the first argument. VLC is needed only when building. The resulting app carries its own libraries and plugins.
+---
 
-The Rust static library in src/lib.rs owns the queue, playback state and libVLC integration. ui.m is the native Objective-C AppKit interface. Hardware decoding is selected by libVLC when supported. This build is locally signed and has not been notarized by Apple.
+## ✨ Highlights
 
-## Verification
+| | |
+|---|---|
+| 🎞️ **Queue & playlists** | Open one file or many. Save and reopen your queue in M3U format. |
+| 🎨 **Six themes** | VLC, RMP Default, Windows 10/11, Windows 7, Windows XP, Mac, and Linux. |
+| 🖥️ **Native interfaces** | AppKit on Mac, Win32 on Windows, with Aero glass on Windows 7. |
+| 🐧 **Linux terminal theme** | A simulated command window (`ls`, `cd`, `play`, `theme`) beside the video. |
+| ⬇️ **Built-in updates** | Checks GitHub releases, verifies the SHA-256 digest, installs, and reopens. |
+| 🎹 **MIDI playback** | Standard MIDI files play offline on Windows, using the bundled General MIDI SoundFont. |
 
-Tested locally with H.264 video and AAC audio in MKV, embedded SRT subtitles, FLAC audio, and fast-start MP4 over HTTP. Format and stream compatibility depend on codecs, encryption and server behavior.
+## 🚀 Getting started
 
-## Windows x64
+| Platform | Download | Install |
+|---|---|---|
+| 🍎 **Mac** (Apple Silicon) | `RMP-Setup-…-macOS-arm64.dmg` | Open the disk image and run **RMP Setup**. It installs to `~/Applications`. |
+| 🪟 **Windows** (x64, Windows 7 SP1 and newer) | `RMP-Setup-x64.exe` | Runs per user, with a Start menu shortcut and a Programs and Features entry. |
+| 📦 **Windows portable** | `RMP-Windows-x64.zip` | Extract the whole ZIP to one folder and run `RMP.exe`. Does not register with Windows. |
 
-The Windows build targets Windows 7 SP1 x64 and newer. Run RMP-Setup-x64.exe for a per-user installation with a Start menu shortcut and an entry in Programs and Features. For portable use, extract the entire Windows release ZIP to one folder and run RMP.exe. Use Open for a file, Media → Open Network Stream for a URL, or drag files onto the window. F11 toggles fullscreen. The executable uses the same Rust playback core and a native Win32 interface.
+> New installations start with the **VLC** theme. You can change it any time under **View → Theme**.
 
-GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, and exercises WAV playback on a Windows runner. A successful Windows release tag publishes the ZIP. See [.github/workflows/windows.yml](.github/workflows/windows.yml) for the toolchain and packaging steps.
+## ⌨️ Controls
 
-The Windows interface uses Segoe UI and themed Win32 controls. On a Windows 7 Aero desktop, the frame extends into the player behind the bottom playback controls. A solid frame is used when composition is unavailable or High Contrast is active. GitHub Actions tests portable playback, installation, installed playback, and uninstallation on Windows Server 2022. Visual and runtime testing on Windows 7 SP1 is pending.
+| Action | Mac | Windows |
+|---|---|---|
+| Open file | `⌘O` | `Ctrl+O` |
+| Open multiple files | `⇧⌘O` | `Ctrl+Shift+O` |
+| Open network stream | `⌘U` | `Ctrl+N` |
+| Play / pause | `Space` | `Space` |
+| Previous / next item | `⌘[` / `⌘]` | Previous / Next buttons |
+| Toggle full screen | `⌃⌘F` | `F11` or double-click the video |
 
-## Player themes
+In fullscreen, the floating controls hide after 2.5 seconds and return when the pointer moves. Press Escape or the fullscreen control to leave.
 
-Open **View → Theme** in the macOS menu bar or the Windows player’s menu bar. The Windows XP theme opens in Now Playing, with the current queue beside the video. The Windows 7 theme opens in a searchable media library with a centered playback bar. The library remembers media opened in RMP. Use the playlist controls to save your queue in M3U format or open a saved playlist. Double-click a track to play it, or double-click the video to enter and leave fullscreen.
+Use **Media → Open File** for one item, or **Open Multiple Files** to add several. **View → Playlist** shows the playback order. **Media → Open Network Stream** accepts a direct media URL. **Audio** and **Subtitle** list the tracks provided by the current media.
 
-New installations start with the VLC theme. Windows 10/11, Mac and RMP Default are also available. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
+## 🎨 Themes
 
-Select **View → Theme → Linux** to open the RMP command window beside the playback window. Switching themes keeps the current track playing. Type `help` for the built-in commands. For example, use `cd ~/Music`, then `ls`, then `play "Live Set.flac"`. Use `theme back` to restore your previous theme or `theme vlc` to switch directly. Tab completes filenames and the up arrow recalls earlier commands. The terminal interprets input inside RMP and has no system shell or program launcher.
+| Theme | Look | Notes |
+|---|---|---|
+| **VLC** | Compact, light transport | Default for new installs. Keeps the VLC cone while paused and stopped. |
+| **RMP Default** | RMP's own default look | — |
+| **Windows 10/11** | Modern Windows look | — |
+| **Windows 7** | Aero library | Searchable library with a centered playback bar. Opens video in Now Playing. |
+| **Windows XP** | Now Playing layout | Queue beside the video, with a navigation strip. |
+| **Mac** | AppKit | Behind-window visual effect on the playback bar. |
+| **Linux** | Terminal + playback window | See below. |
 
-The Windows 7 theme on Windows uses DwmExtendFrameIntoClientArea with only a bottom margin. Windows and the installed compositor determine the appearance. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
+Changing themes keeps the current media and playback position, and RMP remembers your choice on this computer.
 
-The three Windows themes draw on screenshots of [XP Explorer](https://gekk.info/articles/explorer.html), [Windows Media Player 12 on Windows 7](https://harisnadeem.com/2009/01/29/windows-7-screenshots-eye-candy/windows-media-player-12/), and [Films & TV on Windows 10](https://learn.microsoft.com/en-us/answers/questions/2813678/video-playback-stretched-over-windows-media-player).
+Open **View → Theme** from the menu bar on either platform. The Windows XP and Windows 7 themes draw on screenshots of [XP Explorer](https://gekk.info/articles/explorer.html), [Windows Media Player 12 on Windows 7](https://harisnadeem.com/2009/01/29/windows-7-screenshots-eye-candy/windows-media-player-12/), and [Films & TV on Windows 10](https://learn.microsoft.com/en-us/answers/questions/2813678/video-playback-stretched-over-windows-media-player).
 
-## Installing and updating
+### 🐧 Linux terminal theme
 
-Both graphical installers let you select an initial theme. Windows installs for the current account. On macOS, open the setup disk image and run RMP Setup to install in ~/Applications. You can change the theme later under View → Theme.
+Select **View → Theme → Linux** to open the RMP command window beside the playback window. Switching themes keeps the current track playing.
 
-Once per launch, RMP checks published GitHub releases in the background. A newer stable version with a matching platform download opens a release-notes prompt. Choose Update (Yes on Windows) to download, verify the GitHub asset's SHA-256 digest, install and reopen. Choose Not now (No on Windows) to reconsider next launch. Updates require access to GitHub. On macOS, an update launched from a read-only location installs in the current user’s Applications folder. Install this updater-equipped release manually if upgrading from 2.2 or earlier.
+```text
+rmp:~$ cd ~/Music
+rmp:~$ ls
+rmp:~$ play "Live Set.flac"
+rmp:~$ theme back
+```
 
-## RMP 2.5
+- Type `help` for the built-in commands.
+- `theme back` restores your previous theme. `theme vlc` switches directly.
+- Tab completes filenames, and ↑ recalls earlier commands.
+- It interprets input inside RMP only. There's no system shell or program launcher.
 
-New installations start with **VLC**, a light, compact theme based on VLC's desktop transport. The other five themes remain available, and upgrades retain your selection. Fullscreen expands video to the window edges. Its floating controls hide after 2.5 seconds of inactivity and return when the pointer moves. Use the fullscreen control or Escape to leave.
+## 🔄 Updating
 
-The Windows installer registers RMP under Default apps. Choose Rust Media Player in Windows Settings → Apps → Default apps, or choose it from Open with for a media file. On Mac, select a media file in Finder → Get Info → Open with → RMP → Change All. The portable Windows ZIP does not register the application with Windows.
+RMP checks GitHub releases once per launch. A newer stable release with a matching download opens a release-notes prompt.
 
-Standard MIDI files (.mid and .midi) play through the normal file, queue and playback controls. Windows includes the TimGM6mb General MIDI SoundFont for offline synthesis. macOS uses the system AudioToolbox instruments.
+1. Choose **Update** (**Yes** on Windows) to download the release.
+2. RMP verifies the asset's SHA-256 digest against the GitHub release.
+3. It shows a progress bar and a short countdown, then installs and reopens.
+4. Choose **Not now** (**No** on Windows) to be asked again next launch.
+
+On macOS, an update launched from a read-only location installs into your `~/Applications` folder. If you're upgrading from 2.2 or earlier, install the current release manually once.
+
+## 🛠️ Build from source
+
+**Mac:** install a recent stable Rust toolchain, the Xcode Command Line Tools, and an arm64 VLC 3.0.x app at `/Applications/VLC.app`. Then run:
+
+```bash
+./build.sh                  # creates build/RMP.app
+VLC_APP=/path/to/VLC.app ./build.sh   # use another VLC bundle
+```
+
+VLC is needed only at build time. The resulting app carries its own libraries and plugins.
+
+**Project layout**
+- `src/lib.rs`: the queue, playback state and libVLC integration (Rust).
+- `ui.m`: the native AppKit interface (Objective-C).
+- `windows/`: the Win32 interface and installer.
+- `.github/workflows/windows.yml`: the Windows build, tests and packaging.
+
+This Mac build is locally signed and hasn't been notarized by Apple.
+
+## ✅ Verification
+
+- **Mac:** tested locally with H.264 video and AAC audio in MKV, embedded SRT subtitles, FLAC audio, and fast-start MP4 over HTTP.
+- **Windows:** GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, and runs playback, installation, installed playback and uninstallation tests on Windows Server 2022.
+- **Windows 7 SP1:** visual and runtime testing is still pending.
+
+Format and stream compatibility depend on the codecs, encryption and server behaviour involved.
+
+## 🪟 Windows details
+
+- The interface uses Segoe UI and themed Win32 controls.
+- On a Windows 7 Aero desktop, the frame extends behind the bottom playback controls. A solid frame is used when composition is unavailable or High Contrast is on.
+- The Windows 7 theme uses `DwmExtendFrameIntoClientArea` with only a bottom margin, so Windows and the compositor decide the final look.
+- RMP's Windows installer registers it under **Default apps**. Choose **Rust Media Player** in **Settings → Apps → Default apps**, or pick it from **Open with** for a media file.
+- Standard MIDI files (`.mid`, `.midi`) play through the normal file, queue and playback controls. Windows includes the TimGM6mb General MIDI SoundFont for offline synthesis.
+
+## 🍎 Mac details
+
+- Choose a media file in Finder, then **Get Info → Open with → RMP → Change All** to make RMP the default.
+- On macOS, the playback bar uses a behind-window visual effect while transparency is enabled.
+- Window management buttons and system dialogs follow the host OS.
+- Standard MIDI files use the system AudioToolbox instruments.
+
+---
+
+<div align="center">
+
+Made by [KMThegamer2022](https://github.com/KMThegamer2022) · [Report an issue](https://github.com/KMThegamer2022/RMP/issues)
+
+</div>
