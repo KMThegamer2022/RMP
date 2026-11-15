@@ -217,11 +217,15 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.1.0</string>
+	<string>3.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>15</string>
+	<string>16</string>
+	<key>NSCameraUsageDescription</key>
+	<string>RMP uses the camera when you open a video capture device.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>RMP uses the microphone when you open an audio capture device.</string>
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
