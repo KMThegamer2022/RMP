@@ -19,7 +19,7 @@ public static class InstallerUI {
  [DllImport("user32")] public static extern bool IsWindowVisible(IntPtr h);
  [DllImport("user32")] static extern int GetWindowLongW(IntPtr h,int index);
  [DllImport("user32",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr w,StringBuilder name,int length);
- [DllImport("user32",CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr w,StringBuilder name,int length);
+ [DllImport("user32",EntryPoint="SendMessageW",CharSet=CharSet.Unicode)] static extern IntPtr ReadText(IntPtr h,uint msg,IntPtr wp,StringBuilder text);
  [DllImport("user32")] static extern bool GetWindowRect(IntPtr h,out Rect rect);
  [DllImport("user32")] public static extern IntPtr GetParent(IntPtr h);
  [DllImport("user32")] public static extern IntPtr GetDlgItem(IntPtr h,int id);
@@ -27,7 +27,7 @@ public static class InstallerUI {
  [DllImport("user32")] public static extern bool PostMessageW(IntPtr h,uint msg,IntPtr wp,IntPtr lp);
  [DllImport("user32")] public static extern bool SetWindowPos(IntPtr h,IntPtr after,int x,int y,int cx,int cy,uint flags);
  public static Rect Bounds(IntPtr h){Rect r;if(!GetWindowRect(h,out r))throw new InvalidOperationException("Could not measure control");return r;}
- public static string Text(IntPtr h){var s=new StringBuilder(512);GetWindowText(h,s,512);return s.ToString();}
+ public static string Text(IntPtr h){var s=new StringBuilder(512);ReadText(h,13,(IntPtr)512,s);return s.ToString();}
  public static string Class(IntPtr h){var s=new StringBuilder(64);GetClassName(h,s,64);return s.ToString();}
  public static bool IsRadio(IntPtr h){int kind=GetWindowLongW(h,-16)&15;return Class(h)=="Button"&&(kind==4||kind==9);}
  public static IntPtr[] Dialogs(int pid){
