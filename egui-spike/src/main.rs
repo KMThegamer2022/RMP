@@ -188,6 +188,7 @@ struct App {
     skin: Skin,
     applied_skin: Option<Skin>,
     title_cmd: Option<String>,
+    presentation_fullscreen: Option<bool>,
     recent: Vec<String>,
     prompt: Option<Prompt>,
     note: Option<(String, String)>,
@@ -250,6 +251,7 @@ impl App {
             skin,
             applied_skin: None,
             title_cmd: None,
+            presentation_fullscreen: None,
             recent: load_recent(),
             prompt: None,
             note: None,
@@ -763,6 +765,10 @@ impl eframe::App for App {
 
         // Fullscreen hides the menu bar and the bars (mac-fullscreen.h). Mouse movement shows the transport.
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if self.presentation_fullscreen != Some(fullscreen) {
+            self.presentation_fullscreen = Some(fullscreen);
+            set_presentation(fullscreen);
+        }
         if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) || (fullscreen && !self.was_fullscreen) {
             self.last_motion = std::time::Instant::now();
         }
@@ -1315,6 +1321,19 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// Hides the macOS menu bar and Dock while fullscreen, so the top-edge reveal shows only the egui menu.
+fn set_presentation(fullscreen: bool) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    let options = if fullscreen {
+        objc2_app_kit::NSApplicationPresentationOptions::HideMenuBar
+            | objc2_app_kit::NSApplicationPresentationOptions::HideDock
+    } else {
+        objc2_app_kit::NSApplicationPresentationOptions::Default
+    };
+    app.setPresentationOptions(options);
 }
 
 /// True when the mouse is within a few points of the top of the main screen.
