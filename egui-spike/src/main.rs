@@ -17,6 +17,60 @@ mod menus;
 mod terminal;
 use menus::Native;
 
+/// Settings from the Preferences and Customize Interface dialogs (ui.m configureView).
+#[derive(Clone, Copy, PartialEq)]
+pub struct Settings {
+    pub advanced: bool,
+    pub status_bar: bool,
+    pub dock_playlist: bool,
+    pub startup_volume: i32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self { advanced: false, status_bar: false, dock_playlist: true, startup_volume: 80 }
+    }
+}
+
+fn settings_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike/settings.txt"))
+}
+
+fn load_settings() -> Settings {
+    let mut s = Settings::default();
+    let Some(text) = settings_path().and_then(|p| std::fs::read_to_string(p).ok()) else { return s };
+    for line in text.lines() {
+        let Some((k, v)) = line.split_once('=') else { continue };
+        match k {
+            "advanced" => s.advanced = v == "1",
+            "status_bar" => s.status_bar = v == "1",
+            "dock_playlist" => s.dock_playlist = v == "1",
+            "startup_volume" => s.startup_volume = v.parse().unwrap_or(80),
+            _ => {}
+        }
+    }
+    s
+}
+
+fn save_settings(s: &Settings) {
+    let Some(path) = settings_path() else { return };
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let text = format!(
+        "advanced={}\nstatus_bar={}\ndock_playlist={}\nstartup_volume={}\n",
+        s.advanced as u8, s.status_bar as u8, s.dock_playlist as u8, s.startup_volume
+    );
+    let _ = std::fs::write(path, text);
+}
+
+/// Dialogs raised by menu items.
+pub enum Dialog {
+    Preferences,
+    Customize,
+}
+
 /// Text prompts raised by menu items (Open Network Stream…, Jump to Specific Time…).
 pub enum Prompt {
     Stream(String),
@@ -190,6 +244,9 @@ struct App {
     title_cmd: Option<String>,
     presentation_fullscreen: Option<bool>,
     recent: Vec<String>,
+    settings: Settings,
+    dialog: Option<Dialog>,
+    show_queue: bool,
     prompt: Option<Prompt>,
     note: Option<(String, String)>,
     /// Last mouse movement; the fullscreen transport shows for a while after it.
@@ -209,7 +266,7 @@ enum Icon {
     Fullscreen,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Item {
     Play,
     Prev,
@@ -253,6 +310,9 @@ impl App {
             title_cmd: None,
             presentation_fullscreen: None,
             recent: load_recent(),
+            settings: load_settings(),
+            dialog: None,
+            show_queue: false,
             prompt: None,
             note: None,
             last_motion: std::time::Instant::now(),
@@ -693,61 +753,49 @@ impl eframe::App for App {
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             self.toggle();
         }
-        // Keyboard shortcuts from installPlayerMenus (mac-menus.h).
-        let (cmd, shift, ctrl, key_o, key_u, key_t, key_e, key_l, key_q, key_f, key_lb, key_rb) = ctx.input(|i| {
-            (
-                i.modifiers.command,
-                i.modifiers.shift,
-                i.modifiers.ctrl,
-                i.key_pressed(egui::Key::O),
-                i.key_pressed(egui::Key::U),
-                i.key_pressed(egui::Key::T),
-                i.key_pressed(egui::Key::E),
-                i.key_pressed(egui::Key::L),
-                i.key_pressed(egui::Key::Q),
-                i.key_pressed(egui::Key::F),
-                i.key_pressed(egui::Key::OpenBracket),
-                i.key_pressed(egui::Key::CloseBracket),
-            )
+        // Keyboard shortcuts from installPlayerMenus (mac-menus.h). Modifiers are read from each key event:
+        // the frame's modifier state can lag behind the key, which dropped Command shortcuts.
+        let presses: Vec<(egui::Key, bool, bool, bool)> = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                        Some((*key, modifiers.shift, modifiers.command, modifiers.ctrl))
+                    }
+                    _ => None,
+                })
+                .collect()
         });
+        let hit = |key: egui::Key, shift: bool, cmd: bool, ctrl: bool| {
+            presses.iter().any(|p| p.0 == key && p.1 == shift && p.2 == cmd && p.3 == ctrl)
+        };
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             open_link(LINK_TARGET);
         }
-        // Ctrl+Cmd+F: macOS delivers the key event with the modifiers attached, but the frame's
-        // modifier state can lag behind it, so the shortcut is read from the key event itself.
-        let fullscreen_key = ctx.input(|i| {
-            i.events.iter().any(|e| {
-                matches!(e, egui::Event::Key { key: egui::Key::F, pressed: true, modifiers, .. }
-                    if modifiers.command && modifiers.ctrl)
-            })
-        });
         let typing = ctx.memory(|m| m.focused().is_some());
         if !typing {
-            if cmd && key_o && !shift {
+            if hit(egui::Key::O, false, true, false) {
                 self.open_dialog(false);
-            } else if cmd && key_o && shift {
+            } else if hit(egui::Key::O, true, true, false) {
                 self.open_dialog(true);
-            } else if cmd && key_u {
+            } else if hit(egui::Key::U, false, true, false) {
                 self.note_or_prompt(Native::OpenStream);
-            } else if cmd && key_t {
+            } else if hit(egui::Key::T, false, true, false) {
                 self.note_or_prompt(Native::TimeJump);
-            } else if cmd && key_e {
+            } else if hit(egui::Key::E, false, true, false) {
                 let r = menus::engine_action(self, "effects", "");
                 if !r.is_empty() {
                     self.note = Some(("Effects and Filters".into(), r));
                 }
-            } else if cmd && key_l {
-                let r = menus::engine_action(self, "playlist", "");
-                if !r.is_empty() {
-                    self.note = Some(("Playlist".into(), r));
-                }
-            } else if fullscreen_key {
+            } else if hit(egui::Key::L, false, true, false) {
+                self.show_queue = !self.show_queue;
+            } else if hit(egui::Key::F, false, true, true) {
                 self.run_native(Native::Fullscreen, &ctx);
-            } else if cmd && key_q {
+            } else if hit(egui::Key::Q, false, true, false) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else if key_lb {
+            } else if hit(egui::Key::OpenBracket, false, false, false) {
                 self.step(-1);
-            } else if key_rb {
+            } else if hit(egui::Key::CloseBracket, false, false, false) {
                 self.step(1);
             }
         }
@@ -997,13 +1045,15 @@ impl eframe::App for App {
                             actions.push(Item::Fullscreen);
                         }
                     }
-                    Item::Queue | Item::Repeat | Item::Shuffle => {
-                        let (caption, glyph) = match item {
-                            Item::Queue => ("Queue", None),
-                            Item::Repeat => ("↻", Some("↻")),
-                            _ => ("⤨", Some("⤨")),
-                        };
-                        let _ = glyph;
+                    Item::Queue => {
+                        let caption = "Queue";
+                        let width = text_width(ui, caption, 13.0) + 14.0;
+                        if tbutton(ui, skin, &th, BtnSpec { caption, size: 13.0, icon: None, width, open: false }).clicked() {
+                            self.show_queue = !self.show_queue;
+                        }
+                    }
+                    Item::Repeat | Item::Shuffle => {
+                        let caption = if item == Item::Repeat { "↻" } else { "⤨" };
                         let width = text_width(ui, caption, 13.0) + 14.0;
                         let _ = tbutton(ui, skin, &th, BtnSpec { caption, size: 13.0, icon: None, width, open: false });
                     }
@@ -1054,6 +1104,20 @@ impl eframe::App for App {
         }
         }
 
+        self.draw_settings_dialog(&ctx);
+        self.draw_queue_window(&ctx);
+        if self.settings.status_bar {
+            egui::Panel::bottom("status").show(ui, |ui| {
+                let clock = match self.player() {
+                    Some(p) => {
+                        let (t, d) = unsafe { (engine::ap_time(p), engine::ap_length(p)) };
+                        format!("{} / {}", stamp(t), if d > 0 { stamp(d) } else { "—".into() })
+                    }
+                    None => "0:00 / —".into(),
+                };
+                ui.label(format!("{}   {}", self.status, clock));
+            });
+        }
         if show_float {
             self.draw_floating_transport(ui, &th, state);
         }
@@ -1076,6 +1140,89 @@ impl App {
             Native::OpenStream => self.prompt = Some(Prompt::Stream(String::new())),
             Native::TimeJump => self.prompt = Some(Prompt::Time(String::new())),
             _ => {}
+        }
+    }
+
+    /// The queue (Queue button, View → Playlist): lists the queued items; clicking one plays it.
+    fn draw_queue_window(&mut self, ctx: &egui::Context) {
+        if !self.show_queue {
+            return;
+        }
+        let items: Vec<String> = match self.player() {
+            Some(p) => {
+                let count = unsafe { engine::ap_count(p) };
+                (0..count)
+                    .map(|i| {
+                        let raw = unsafe { engine::ap_item(p, i) };
+                        if raw.is_null() {
+                            return String::new();
+                        }
+                        let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
+                        path.rsplit('/').next().unwrap_or(&path).to_string()
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        let current = self.player().map(|p| unsafe { engine::ap_index(p) }).unwrap_or(-1);
+        let mut play: Option<usize> = None;
+        let mut open = true;
+        egui::Window::new("Current Playlist").open(&mut open).default_width(260.0).show(ctx, |ui| {
+            if items.is_empty() {
+                ui.label("The playlist is empty.");
+            }
+            for (i, name) in items.iter().enumerate() {
+                let selected = current == i as isize;
+                if ui.selectable_label(selected, format!("{}. {}", i + 1, name)).clicked() {
+                    play = Some(i);
+                }
+            }
+        });
+        if !open {
+            self.show_queue = false;
+        }
+        if let Some(i) = play {
+            if let Some(p) = self.player() {
+                unsafe { engine::ap_play(p, i) };
+            }
+        }
+    }
+
+    /// Preferences / Customize Interface, laid out like the shipping NSAlert (configureView in mac-menus.h).
+    fn draw_settings_dialog(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.dialog.as_ref() else { return };
+        let preferences = matches!(kind, Dialog::Preferences);
+        let title = if preferences { "RMP Preferences" } else { "Customize Interface" };
+        let mut draft = self.settings;
+        let mut apply = false;
+        let mut cancel = false;
+        egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.checkbox(&mut draft.advanced, "Show advanced playback controls");
+            ui.checkbox(&mut draft.status_bar, "Show status bar");
+            ui.checkbox(&mut draft.dock_playlist, "Dock playlist in player");
+            if preferences {
+                ui.label("Startup volume");
+                ui.add(egui::Slider::new(&mut draft.startup_volume, 0..=100));
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Apply").clicked() {
+                    apply = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+        });
+        if apply {
+            self.settings = draft;
+            save_settings(&self.settings);
+            if preferences {
+                self.set_volume(draft.startup_volume);
+                self.volume = draft.startup_volume;
+            }
+            self.dialog = None;
+        } else if cancel {
+            self.dialog = None;
         }
     }
 

@@ -16,6 +16,9 @@ pub enum Native {
     OpenFile,
     OpenMultiple,
     OpenStream,
+    Customize,
+    Preferences,
+    Playlist,
     OpenPlaylist,
     SavePlaylist,
     TimeJump,
@@ -153,15 +156,15 @@ pub fn menu_bar() -> Vec<(&'static str, Vec<Entry>)> {
                 cmd("Messages", "messages", ""),
                 cmd("Plugins and Extensions", "plugins", ""),
                 Sep,
-                cmd("Customize Interface…", "customize", ""),
-                cmd("Preferences…", "preferences", ""),
+                nat("Customize Interface…", Customize, ""),
+                nat("Preferences…", Preferences, ""),
                 cmd("Desktop Shortcut", "desktop-shortcut", ""),
             ],
         ),
         (
             "View",
             vec![
-                cmd_sc("Playlist", "playlist", "", "⌘L"),
+                nat("Playlist", Playlist, "⌘L"),
                 cmd("Docked Playlist", "docked", ""),
                 cmd("Always on Top", "top", ""),
                 Sep,
@@ -354,6 +357,9 @@ impl App {
             Native::About => {
                 self.note = Some(("About RMP".into(), "RMP egui spike. Not the shipping app.".into()));
             }
+            Native::Customize => self.dialog = Some(crate::Dialog::Customize),
+            Native::Playlist => self.show_queue = !self.show_queue,
+            Native::Preferences => self.dialog = Some(crate::Dialog::Preferences),
             Native::Pending(name) => {
                 self.note = Some((name.into(), "This item is not in the egui spike yet.".into()));
             }
