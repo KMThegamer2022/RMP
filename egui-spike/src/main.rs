@@ -766,7 +766,7 @@ impl eframe::App for App {
         // Menu bar (installPlayerMenus). Actions are collected and run after the bar is drawn.
         let mut picked: Vec<Native> = Vec::new();
         let mut notes: Vec<(String, String)> = Vec::new();
-        if !fullscreen || pointer_at_top {
+        if skin != Skin::Linux && (!fullscreen || pointer_at_top) {
             egui::Panel::top("menubar").show(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     for (title, entries) in menus::menu_bar() {
