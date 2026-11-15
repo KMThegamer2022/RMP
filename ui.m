@@ -140,7 +140,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  ThemeSurface *surface=(ThemeSurface *)window.contentView;surface.skin=skin;[surface setNeedsDisplay:YES];
  BOOL translucent=skin==SEVEN && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency;
  aeroDeck.hidden=!translucent;window.opaque=!translucent;
- window.appearance=[NSAppearance appearanceNamed:(skin==MAC||skin==RMP_DEFAULT)?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
+ window.appearance=[NSAppearance appearanceNamed:(skin==MAC||skin==RMP_DEFAULT||skin==LINUX_THEME)?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
  window.titlebarAppearsTransparent=YES;
  window.backgroundColor=translucent?NSColor.clearColor:rgb(skin==XP?0x3978db:skin==MODERN?0xf5f5f5:themes[skin].panel);
  [self styleView:surface];[self arrangeChrome];if(panel)[self styleView:panel.contentView];
