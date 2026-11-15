@@ -2,6 +2,7 @@
 use std::ffi::{c_char, c_void, CStr};
 use std::ptr;
 mod media_library;
+mod terminal;
 use media_library::{Item, Library};
 use std::path::Path;
 type Handle = *mut c_void;
@@ -53,6 +54,7 @@ pub struct Player {
     player: Handle,
     queue: Vec<Item>,
     library: Library,
+    terminal: terminal::Terminal,
     current: Option<usize>,
     volume: i32,
 }
@@ -65,6 +67,7 @@ pub unsafe extern "C" fn ap_create(view: Handle) -> *mut Player {
         player: ptr::null_mut(),
         queue: Vec::new(),
         library: Library::new(),
+        terminal: terminal::Terminal::new(),
         current: None,
         volume: 80,
     }))
