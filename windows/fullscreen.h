@@ -16,7 +16,7 @@ static void moveTransport(HWND from,HWND to){
  HWND rest[]={position,level,volumeLabel,clocktext};for(unsigned i=0;i<4;i++)SetParent(rest[i],to);
 }
 static void updateTransport(void){
- if(!fullscreen||!transport)return;
+ if(!fullscreen||!transport||skin==LINUX_THEME)return;
  POINT mouse;GetCursorPos(&mouse);RECT r;GetWindowRect(transport,&r);
  bool moved=mouse.x!=lastMouse.x||mouse.y!=lastMouse.y;lastMouse=mouse;
  if(moved||(IsWindowVisible(transport)&&PtInRect(&r,mouse))||GetCapture()){hideAt=GetTickCount64()+2500;ShowWindow(transport,SW_SHOWNOACTIVATE);}

@@ -61,6 +61,7 @@ static wchar_t *wide(const char *);
 static void start(size_t),showCurrentTrack(void),layout(HWND,int,int);
 #include "media-library.h"
 #include "transport-labels.h"
+#include "terminal.h"
 /* Older Windows versions route wheel input to the focus owner. Follow the
    pointer over the volume control even when a child such as the queue has focus. */
 static bool routeWheel(HWND target,WPARAM direction,LPARAM location){
@@ -80,7 +81,7 @@ static bool routeWheel(HWND target,WPARAM direction,LPARAM location){
 static void layout(HWND w,int x,int y){
  bool classic=skin==VLC_THEME;
  int top=!fullscreen&&skin==XP?scale(27):0, frame=!fullscreen&&skin==XP?scale(4):0;
- int height=scale(classic?68:mediaTheme()?MEDIA_TRANSPORT_HEIGHT:STANDARD_TRANSPORT_HEIGHT), deck=y-height;
+ int height=skin==LINUX_THEME?0:scale(classic?68:mediaTheme()?MEDIA_TRANSPORT_HEIGHT:STANDARD_TRANSPORT_HEIGHT), deck=y-height;
  MoveWindow(video,frame,top,x-2*frame,max(1,(fullscreen?y:deck)-top),TRUE);
  int logo=scale(classic?120:96);
  MoveWindow(idleLogo,(x-logo)/2,((fullscreen?y:deck)-top-logo)/2,logo,logo,TRUE);
@@ -91,6 +92,13 @@ static void layout(HWND w,int x,int y){
  HWND host=fullscreen?transport:w;
  if(fullscreen){int width=min(x-scale(20),scale(740));POINT origin={(x-width)/2,y-height-scale(24)};ClientToScreen(w,&origin);
  SetWindowPos(host,HWND_TOP,origin.x,origin.y,width,height,SWP_NOACTIVATE);x=width;y=height;deck=0;}
+ HWND aux[]={position,level,volumeLabel,clocktext};
+ for(int i=0;i<4;i++)ShowWindow(aux[i],skin==LINUX_THEME?SW_HIDE:SW_SHOWNA);
+ if(skin==LINUX_THEME){
+  const int ids[]={PLAY,PREV,STOP,NEXT,FULL,LIST,REPEAT,SHUFFLE,OPEN};
+  for(size_t i=0;i<sizeof(ids)/sizeof(*ids);i++)ShowWindow(GetDlgItem(host,ids[i]),SW_HIDE);
+  ShowWindow(idleLogo,SW_HIDE);ShowWindow(transport,SW_HIDE);return;
+ }
  if(mediaTheme()){layoutClassicTransport(host,x,deck);return;}
  int cy=y-scale(classic?34:48);
  MoveWindow(position,scale(10),deck+scale(3),x-scale(142),scale(24),TRUE);
@@ -112,6 +120,14 @@ static void applyTheme(HWND w,int value){
  skin=value;
  if(changing){awaitingVideo=false;if(mediaTheme())browserPage=skin==XP?NAV_NOW:NAV_LIBRARY;}
  if(panelBrush)DeleteObject(panelBrush);panelBrush=CreateSolidBrush(skin==SEVEN?GetSysColor(COLOR_BTNFACE):color(skin==XP?0xc8d5e8:themes[skin].panel));
+ if(changing){
+  if(skin==LINUX_THEME)PostMessageW(w,REVEAL_TERMINAL,0,0);
+  else{
+   if(terminalWindow)ShowWindow(terminalWindow,SW_HIDE);
+   if(player&&ap_index(player)<0)ShowWindow(idleLogo,SW_SHOWNA);
+  }
+ }
+ EnableMenuItem(bar,SHOW_TERMINAL,MF_BYCOMMAND|(skin==LINUX_THEME?MF_ENABLED:MF_GRAYED));
  CheckMenuRadioItem(themeMenu,THEME_FIRST,THEME_FIRST+THEME_COUNT-1,THEME_FIRST+skin,MF_BYCOMMAND);
  updateGlass(w);
  HWND host=fullscreen?transport:w;
@@ -123,6 +139,7 @@ static void applyTheme(HWND w,int value){
  if(skin==SEVEN)caption=0xffffffff;
  DwmSetWindowAttribute(w,35,&caption,sizeof(caption));
  COLORREF captionInk=contrastMode?0xffffffff:color(skin==XP||skin==MAC||skin==RMP_DEFAULT?0xffffff:0x152334);
+ if(skin==LINUX_THEME)captionInk=color(0xdbece0);
  if(skin==SEVEN)captionInk=0xffffffff;
  DwmSetWindowAttribute(w,36,&captionInk,sizeof(captionInk));
  int corners=skin==SEVEN?0:(skin==MODERN||skin==XP?1:2);
@@ -179,7 +196,7 @@ static void togglefull(void){
  SetMenu(mainwin,NULL);SetWindowLongPtrW(mainwin,GWL_STYLE,WS_POPUP|WS_VISIBLE|WS_CLIPCHILDREN);
  SetWindowPos(mainwin,HWND_TOP,mi.rcMonitor.left,mi.rcMonitor.top,mi.rcMonitor.right-mi.rcMonitor.left,mi.rcMonitor.bottom-mi.rcMonitor.top,SWP_FRAMECHANGED);}
  else{ShowWindow(transport,SW_HIDE);moveTransport(transport,mainwin);fullscreen=false;SetWindowLongPtrW(mainwin,GWL_STYLE,WS_OVERLAPPEDWINDOW|WS_VISIBLE|WS_CLIPCHILDREN);SetMenu(mainwin,bar);SetWindowPlacement(mainwin,&placement);SetWindowPos(mainwin,NULL,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOZORDER|SWP_FRAMECHANGED);}
- applyTheme(mainwin,skin);if(fullscreen)ShowWindow(transport,SW_SHOWNOACTIVATE);
+ applyTheme(mainwin,skin);if(fullscreen&&skin!=LINUX_THEME)ShowWindow(transport,SW_SHOWNOACTIVATE);
 }
 static LRESULT CALLBACK videoProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
  if(msg==WM_LBUTTONDBLCLK){PostMessageW(mainwin,WM_COMMAND,FULL,0);return 0;}
@@ -228,8 +245,8 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case WM_CREATE:{
  mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
  AppendMenuW(file,MF_SEPARATOR,0,NULL);AppendMenuW(file,MF_STRING,490,L"Check for Updates…");
- HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");
- queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+VLC_THEME,names[VLC_THEME]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+RMP_DEFAULT,names[RMP_DEFAULT]);for(int i=0;i<RMP_DEFAULT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);SetMenu(w,bar);
+ HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");AppendMenuW(view,MF_STRING,SHOW_TERMINAL,L"RMP Terminal");
+ queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+VLC_THEME,names[VLC_THEME]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+RMP_DEFAULT,names[RMP_DEFAULT]);for(int i=0;i<RMP_DEFAULT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+LINUX_THEME,names[LINUX_THEME]);SetMenu(w,bar);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|SS_NOTIFY|WS_CLIPCHILDREN);SetWindowSubclass(video,videoProc,1,0);player=ap_create(video);if(!player)return -1;
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE|WS_DISABLED);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
@@ -244,6 +261,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  makeMediaBrowser();
  SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
+ case REVEAL_TERMINAL:revealTerminal();return 0;
  case WM_MOUSEWHEEL:if(routeWheel(w,wp,lp))return 0;break;
  case WM_GETMINMAXINFO:((MINMAXINFO*)lp)->ptMinTrackSize=(POINT){scale(720),scale(340)};return 0;
  case WM_SIZE:if(video)layout(w,LOWORD(lp),HIWORD(lp));return 0;
@@ -320,8 +338,9 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case FILTER:if(HIWORD(wp)==EN_CHANGE)rebuildMediaRows();return 0;
  case LOAD_LIST:case SAVE_LIST:playlistFile(LOWORD(wp)==SAVE_LIST);return 0;
  case ADD_FILE:openfile();return 0;
+ case SHOW_TERMINAL:revealTerminal();return 0;
  }
- if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;applyTheme(w,value);storeTheme(value);return 0;}
+ if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;if(value==LINUX_THEME&&skin==value)PostMessageW(w,REVEAL_TERMINAL,0,0);applyTheme(w,value);storeTheme(value);return 0;}
  switch(LOWORD(wp)){case 490:if(!launchCheck(true))MessageBoxW(w,L"The update helper could not start. Reinstall RMP to restore it.",L"RMP update",MB_ICONERROR);break;case LIST:{RECT r;GetWindowRect(GetDlgItem(fullscreen?transport:w,LIST),&r);TrackPopupMenu(queue,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);break;}
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
  case SHUFFLE:shuffle=!shuffle;SetWindowTextW((HWND)lp,shuffle?L"⤨✓":L"⤨");break;
@@ -333,7 +352,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  exitcode=ap_state(player)==3 && ap_time(player)>100?0:2;DestroyWindow(w);
  }return 0;
  case WM_DROPFILES:{HDROP drop=(HDROP)wp;size_t first=ap_count(player);UINT n=DragQueryFileW(drop,0xffffffff,NULL,0);for(UINT i=0;i<n;i++){wchar_t path[32768];DragQueryFileW(drop,i,path,32768);enqueue(path,false);}DragFinish(drop);start(first);return 0;}
- case WM_DESTROY:InterlockedIncrement(&searchEpoch);clearDetails();for(int i=0;i<9;i++)if(sevenIcons[i])DestroyIcon(sevenIcons[i]);KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
+ case WM_DESTROY:if(terminalWindow)DestroyWindow(terminalWindow);InterlockedIncrement(&searchEpoch);clearDetails();for(int i=0;i<9;i++)if(sevenIcons[i])DestroyIcon(sevenIcons[i]);KillTimer(w,1);DestroyIcon(coneIcon);if(player)ap_destroy(player);DeleteObject(panelBrush);DestroyIcon(brandIcon);DeleteObject(uiFont);PostQuitMessage(exitcode);return 0;
  }
  return DefWindowProcW(w,msg,wp,lp);
 }
@@ -342,6 +361,7 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
  BufferedPaintInit();SetProcessDPIAware();INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES|ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&controls);
  WNDCLASSW c={0};c.lpfnWndProc=windowproc;c.hInstance=h;c.lpszClassName=L"RMPPlayer";c.hIcon=LoadIconW(h,MAKEINTRESOURCEW(1));c.hCursor=LoadCursor(NULL,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_BTNFACE+1);RegisterClassW(&c);
  WNDCLASSW floating={0};floating.lpfnWndProc=transportProc;floating.hInstance=h;floating.lpszClassName=L"RMPTransport";floating.hCursor=c.hCursor;RegisterClassW(&floating);
+ WNDCLASSW terminalClass={0};terminalClass.lpfnWndProc=terminalProc;terminalClass.lpszClassName=L"RMPTerminal";terminalClass.hInstance=h;terminalClass.hCursor=c.hCursor;terminalClass.hIcon=c.hIcon;RegisterClassW(&terminalClass);
  HWND w=CreateWindowW(c.lpszClassName,L"RMP · Rust Media Player",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,900,570,NULL,NULL,h,NULL);if(!w)return 1;
 
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
