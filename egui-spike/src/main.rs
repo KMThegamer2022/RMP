@@ -13,6 +13,29 @@ use std::path::PathBuf;
 // Engine: repo-root src/lib.rs compiled as this crate's library (see Cargo.toml [lib]).
 use egui_spike as engine;
 
+mod menus;
+use menus::Native;
+
+/// Text prompts raised by menu items (Open Network Stream…, Jump to Specific Time…).
+pub enum Prompt {
+    Stream(String),
+    Time(String),
+}
+
+const RECENT_MAX: usize = 20;
+
+fn recent_path() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike/recent.txt"))
+}
+
+fn load_recent() -> Vec<String> {
+    recent_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|s| s.lines().filter(|l| !l.is_empty()).map(String::from).collect())
+        .unwrap_or_default()
+}
+
 const INSET: f32 = 16.0;
 const ROW_GAP: f32 = 8.0;
 const TIMELINE_H: f32 = 21.0;
@@ -156,6 +179,9 @@ struct App {
     skin: Skin,
     applied_skin: Option<Skin>,
     title_cmd: Option<String>,
+    recent: Vec<String>,
+    prompt: Option<Prompt>,
+    note: Option<(String, String)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -209,6 +235,9 @@ impl App {
             skin,
             applied_skin: None,
             title_cmd: None,
+            recent: load_recent(),
+            prompt: None,
+            note: None,
         }
     }
 
@@ -275,13 +304,66 @@ impl App {
         save_skin(skin);
     }
 
-    fn open_dialog(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("Media", &["mp4", "mkv", "mov", "mp3", "flac", "wav", "m4a", "avi", "webm", "ogg"])
-            .pick_file()
-        {
-            self.open_file(path);
+    fn open_dialog(&mut self, multi: bool) {
+        let filter = ["mp4", "mkv", "mov", "mp3", "flac", "wav", "m4a", "avi", "webm", "ogg"];
+        let dialog = rfd::FileDialog::new().add_filter("Media", &filter);
+        let paths = if multi { dialog.pick_files().unwrap_or_default() } else { dialog.pick_file().into_iter().collect() };
+        for (i, path) in paths.into_iter().enumerate() {
+            if i == 0 {
+                self.open_path(path);
+            } else {
+                self.add_to_queue(&path);
+            }
         }
+    }
+
+    /// Opens a file and records it in Open Recent Media.
+    pub fn open_path(&mut self, path: PathBuf) {
+        self.open_file(path.clone());
+        self.remember_recent(&path);
+    }
+
+    fn add_to_queue(&mut self, path: &std::path::Path) {
+        let Ok(c) = CString::new(path.to_string_lossy().as_bytes()) else { return };
+        if let Some(p) = self.player() {
+            unsafe { engine::ap_add(p, c.as_ptr(), false) };
+        }
+        self.remember_recent(path);
+    }
+
+    fn remember_recent(&mut self, path: &std::path::Path) {
+        let text = path.to_string_lossy().into_owned();
+        self.recent.retain(|r| r != &text);
+        self.recent.insert(0, text);
+        self.recent.truncate(RECENT_MAX);
+        if let Some(file) = recent_path() {
+            if let Some(dir) = file.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(file, self.recent.join("\n"));
+        }
+    }
+
+    pub fn clear_recent(&mut self) {
+        self.recent.clear();
+        if let Some(file) = recent_path() {
+            let _ = std::fs::remove_file(file);
+        }
+    }
+
+    /// Plays a network URL (Open Network Stream…). The engine resolves it like a local path.
+    fn open_location(&mut self, url: &str) {
+        let Ok(c) = CString::new(url) else { return };
+        let Some(p) = self.player() else { return };
+        unsafe {
+            engine::ap_stop(p);
+            let index = engine::ap_count(p);
+            engine::ap_add(p, c.as_ptr(), true);
+            let ok = engine::ap_play(p, index);
+            self.status = if ok { "Opening…".into() } else { "Could not open media".into() };
+        }
+        self.title_cmd = Some(format!("RMP — {url}"));
+        self.remember_recent(std::path::Path::new(url));
     }
 
     /// Creates the child NSView that libvlc draws into, inside the screen rect above the egui view.
@@ -545,7 +627,7 @@ impl eframe::App for App {
         if self.player.is_null() {
             self.attach_video(frame);
             if let Some(path) = std::env::args_os().nth(1) {
-                self.open_file(PathBuf::from(path));
+                self.open_path(PathBuf::from(path));
             }
         }
         if self.cone.is_none() {
@@ -565,8 +647,52 @@ impl eframe::App for App {
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             self.toggle();
         }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::O)) {
-            self.open_dialog();
+        // Keyboard shortcuts from installPlayerMenus (mac-menus.h).
+        let (cmd, shift, ctrl, key_o, key_u, key_t, key_e, key_l, key_q, key_f, key_lb, key_rb) = ctx.input(|i| {
+            (
+                i.modifiers.command,
+                i.modifiers.shift,
+                i.modifiers.ctrl,
+                i.key_pressed(egui::Key::O),
+                i.key_pressed(egui::Key::U),
+                i.key_pressed(egui::Key::T),
+                i.key_pressed(egui::Key::E),
+                i.key_pressed(egui::Key::L),
+                i.key_pressed(egui::Key::Q),
+                i.key_pressed(egui::Key::F),
+                i.key_pressed(egui::Key::OpenBracket),
+                i.key_pressed(egui::Key::CloseBracket),
+            )
+        });
+        let typing = ctx.memory(|m| m.focused().is_some());
+        if !typing {
+            if cmd && key_o && !shift {
+                self.open_dialog(false);
+            } else if cmd && key_o && shift {
+                self.open_dialog(true);
+            } else if cmd && key_u {
+                self.note_or_prompt(Native::OpenStream);
+            } else if cmd && key_t {
+                self.note_or_prompt(Native::TimeJump);
+            } else if cmd && key_e {
+                let r = menus::engine_action(self, "effects", "");
+                if !r.is_empty() {
+                    self.note = Some(("Effects and Filters".into(), r));
+                }
+            } else if cmd && key_l {
+                let r = menus::engine_action(self, "playlist", "");
+                if !r.is_empty() {
+                    self.note = Some(("Playlist".into(), r));
+                }
+            } else if cmd && ctrl && key_f {
+                self.run_native(Native::Fullscreen, &ctx);
+            } else if cmd && key_q {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if key_lb {
+                self.step(-1);
+            } else if key_rb {
+                self.step(1);
+            }
         }
 
         let skin = self.skin;
@@ -580,30 +706,32 @@ impl eframe::App for App {
                 .to_string();
         }
 
-        // In-window menu bar: View → Theme (saved), File → Open.
+        // Menu bar (installPlayerMenus). Actions are collected and run after the bar is drawn.
+        let mut picked: Vec<Native> = Vec::new();
+        let mut notes: Vec<(String, String)> = Vec::new();
         egui::Panel::top("menubar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("Open Files…   ⌘O").clicked() {
-                        self.open_dialog();
-                        ui.close();
-                    }
-                });
-                ui.menu_button("View", |ui| {
-                    ui.menu_button("Theme", |ui| {
-                        for k in SKINS {
-                            if ui.radio(self.skin == k, k.label()).clicked() {
-                                self.set_skin(k);
-                                ui.close();
-                            }
-                        }
-                    });
-                });
+                for (title, entries) in menus::menu_bar() {
+                    ui.menu_button(title, |ui| menus::render(ui, self, &entries, &mut picked, &mut notes));
+                }
             });
         });
+        for (title, text) in notes {
+            self.note = Some((title, text));
+        }
+        for action in picked {
+            if action == Native::ClearRecent {
+                self.clear_recent();
+            } else {
+                self.run_native(action, &ctx);
+            }
+        }
+        self.draw_dialogs(&ctx);
 
-        let full = ui.max_rect();
+        let full = ui.available_rect_before_wrap();
         let (w, h) = (full.width(), full.height());
+        // Everything below is laid out relative to `full`, which starts under the menu bar.
+        let origin = full.min.to_vec2();
         ui.painter().rect_filled(full, 0.0, th.panel);
         if skin == Skin::Seven {
             vgradient(
@@ -637,7 +765,7 @@ impl eframe::App for App {
         // Top row (ui.m `top`): name, status, Open Files…. Hidden in the VLC skin.
         let mut screen_top = 0.0;
         if has_top {
-            let top_rect = Rect::from_min_max(Pos2::new(INSET, 10.0), Pos2::new(w - INSET, 10.0 + BUTTON_H));
+            let top_rect = Rect::from_min_max(Pos2::new(INSET, 10.0), Pos2::new(w - INSET, 10.0 + BUTTON_H)).translate(origin);
             let mut row = ui.new_child(egui::UiBuilder::new().max_rect(top_rect));
             row.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
@@ -647,14 +775,14 @@ impl eframe::App for App {
                 let spacer = (top_rect.width() - open_w - 170.0).max(0.0);
                 ui.add_space(spacer);
                 if tbutton(ui, skin, &th, BtnSpec { caption: "Open Files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
-                    self.open_dialog();
+                    self.open_dialog(true);
                 }
             });
-            screen_top = top_rect.bottom() + 10.0;
+            screen_top = top_rect.bottom() + 10.0 - origin.y;
         }
 
         // Screen: black, with the cone in the VLC skin while idle (ui.m `cone`).
-        let screen = Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0));
+        let screen = Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin);
         let idle = match self.player() {
             Some(p) => (unsafe { engine::ap_index(p) }) < 0,
             None => true,
@@ -674,13 +802,15 @@ impl eframe::App for App {
                 egui::Image::new(cone).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(CONE_SIZE)));
             }
         }
+        // The video is a native view above egui, so it would cover menus and dialogs. Hide it while one is open.
+        let overlay = self.note.is_some() || self.prompt.is_some() || ctx.any_popup_open();
         if let Some(view) = &self.video_view {
-            view.setHidden(idle);
+            view.setHidden(idle || overlay);
         }
         self.place_video(screen);
 
         // Timeline row (ui.m `timeline`): seek bar + clock.
-        let timeline_rect = Rect::from_min_max(Pos2::new(INSET, timeline_top), Pos2::new(w - INSET, timeline_top + TIMELINE_H));
+        let timeline_rect = Rect::from_min_max(Pos2::new(INSET, timeline_top), Pos2::new(w - INSET, timeline_top + TIMELINE_H)).translate(origin);
         let (t, d, seekable) = match self.player() {
             Some(p) => unsafe { (engine::ap_time(p), engine::ap_length(p), engine::ap_seekable(p)) },
             None => (0, 0, false),
@@ -711,7 +841,7 @@ impl eframe::App for App {
         });
 
         // Bottom transport row (ui.m `bottom`), ordered per skin.
-        let bottom_rect = Rect::from_min_max(Pos2::new(INSET, bottom_top), Pos2::new(w - INSET, bottom_top + BUTTON_H));
+        let bottom_rect = Rect::from_min_max(Pos2::new(INSET, bottom_top), Pos2::new(w - INSET, bottom_top + BUTTON_H)).translate(origin);
         let mut bottom = ui.new_child(egui::UiBuilder::new().max_rect(bottom_rect));
         let mut vol = self.volume;
         let mut volume_changed = false;
@@ -809,6 +939,94 @@ impl eframe::App for App {
             }
         }
     }
+}
+
+impl App {
+    fn note_or_prompt(&mut self, action: Native) {
+        match action {
+            Native::OpenStream => self.prompt = Some(Prompt::Stream(String::new())),
+            Native::TimeJump => self.prompt = Some(Prompt::Time(String::new())),
+            _ => {}
+        }
+    }
+
+    /// Note and prompt windows raised by menu items (menuNote / Open Network Stream… / Jump to Specific Time…).
+    fn draw_dialogs(&mut self, ctx: &egui::Context) {
+        let mut close_note = false;
+        if let Some((title, detail)) = &self.note {
+            egui::Window::new(title.clone()).collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label(detail.clone());
+                if ui.button("OK").clicked() {
+                    close_note = true;
+                }
+            });
+        }
+        if close_note {
+            self.note = None;
+        }
+        let mut submit: Option<Prompt> = None;
+        let mut cancel = false;
+        if let Some(prompt) = self.prompt.as_mut() {
+            let (title, hint, text) = match prompt {
+                Prompt::Stream(t) => ("Open Network Stream", "Enter a URL including its protocol, such as https://…", t),
+                Prompt::Time(t) => ("Jump to Specific Time", "Enter a time as m:ss or h:mm:ss.", t),
+            };
+            egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label(hint);
+                let edit = ui.text_edit_singleline(text);
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+                        submit = Some(match prompt_kind(&title) {
+                            true => Prompt::Stream(text.clone()),
+                            false => Prompt::Time(text.clone()),
+                        });
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        }
+        if cancel {
+            self.prompt = None;
+        }
+        if let Some(prompt) = submit {
+            self.prompt = None;
+            match prompt {
+                Prompt::Stream(url) => {
+                    if url.trim().is_empty() {
+                        return;
+                    }
+                    self.open_location(url.trim());
+                }
+                Prompt::Time(text) => match parse_time(&text) {
+                    Some(ms) => {
+                        if let Some(p) = self.player() {
+                            unsafe { engine::ap_seek(p, ms) };
+                        }
+                    }
+                    None => self.note = Some(("Jump to Specific Time".into(), "Enter a valid playback time.".into())),
+                },
+            }
+        }
+    }
+}
+
+fn prompt_kind(title: &str) -> bool {
+    title == "Open Network Stream"
+}
+
+/// "m:ss" or "h:mm:ss" (or plain seconds) to milliseconds.
+fn parse_time(text: &str) -> Option<i64> {
+    let mut total = 0.0f64;
+    for part in text.trim().split(':') {
+        let v: f64 = part.trim().parse().ok()?;
+        if v < 0.0 {
+            return None;
+        }
+        total = total * 60.0 + v;
+    }
+    Some((total * 1000.0) as i64)
 }
 
 fn install_fonts(ctx: &egui::Context) {

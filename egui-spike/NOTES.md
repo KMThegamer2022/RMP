@@ -166,3 +166,44 @@ single captures `shipping-<slug>.png` and `egui-spike-<slug>.png`. Slugs: `vlc`,
 - Each theme's seek, volume and clock by clicks (only VLC and XP were clicked).
 - Stop, Previous, Next, Fullscreen, Queue, repeat and shuffle in every theme.
 - Audio output.
+
+## Round 4: menus
+
+Menus follow `installPlayerMenus` in `mac-menus.h`: Media, Playback, Audio, Video, Subtitle, Tools, View, Help.
+Source of truth: `src/menus.rs` (spike). Engine-backed entries call the engine's exported
+`ap_menu_action` and `ap_menu_options`, as the shipping app does. Native-only items (Open File/Multiple,
+Open Playlist/Save, Open Network Stream…, Jump to Specific Time…, Play/Pause, Stop, Previous/Next, Fullscreen,
+Quit, About) are in the spike.
+
+### Works
+- All eight menus with the shipping items and order, including separators.
+- Engine submenus (Audio Track, Audio Device, Stereo Mode, Visualizations, Video Track, Title, Chapter,
+  Programme, Zoom, Aspect Ratio, Crop, Deinterlace, Subtitle Track…) list rows from the engine.
+  Verified: Audio Track shows "None available" for the fixture, same as the shipping app.
+- View → Theme and its saved choice (from round 3).
+- Help menu matches the shipping items: Help, Check for Updates…, About RMP.
+- Engine commands (Mute, Increase/Decrease Volume, etc.) run through `ap_menu_action`; result text is
+  shown in a note window like `menuNote`.
+- Keyboard shortcuts for the native items: Space (play/pause), Cmd+O, Cmd+Shift+O, Cmd+U, Cmd+T, Cmd+E,
+  Cmd+L, Ctrl+Cmd+F, Cmd+Q, `[` and `]`.
+- Open Recent Media: list is kept in `recent.txt` under Application Support (max 20).
+
+### Verified by running
+- Menu bar renders and Audio, Help and Audio Track menus open (screenshots in `screenshots/menus/`).
+- Space pauses and resumes (before/after frames differ in the play icon and time).
+- Side-by-side Audio Track submenu with the shipping app's native menu.
+
+### Not verified
+- Each menu action (Jump, Stop, Next, Open dialogs, Save Playlist, Open Stream) by clicking.
+- Keyboard shortcuts other than Space.
+- Engine Options rows with real tracks (the fixture has none).
+
+### Differences from the shipping app
+- The shipping app uses the native macOS menu bar at the top of the screen. The spike draws its menus
+  inside the window. This is a decision for the user (see report).
+- While a menu or dialog is open, the spike hides the video view (the video is a native view above egui),
+  so the screen goes black until the menu closes.
+- Dialog windows are egui windows, not native sheets.
+
+### Still missing
+- Media library, queue, terminal, preferences, keyboard shortcut customisation.
