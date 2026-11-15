@@ -711,6 +711,14 @@ impl eframe::App for App {
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
             open_link(LINK_TARGET);
         }
+        // Ctrl+Cmd+F: macOS delivers the key event with the modifiers attached, but the frame's
+        // modifier state can lag behind it, so the shortcut is read from the key event itself.
+        let fullscreen_key = ctx.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(e, egui::Event::Key { key: egui::Key::F, pressed: true, modifiers, .. }
+                    if modifiers.command && modifiers.ctrl)
+            })
+        });
         let typing = ctx.memory(|m| m.focused().is_some());
         if !typing {
             if cmd && key_o && !shift {
@@ -731,7 +739,7 @@ impl eframe::App for App {
                 if !r.is_empty() {
                     self.note = Some(("Playlist".into(), r));
                 }
-            } else if cmd && ctrl && key_f {
+            } else if fullscreen_key {
                 self.run_native(Native::Fullscreen, &ctx);
             } else if cmd && key_q {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -760,7 +768,9 @@ impl eframe::App for App {
         }
         self.was_fullscreen = fullscreen;
         let bare = fullscreen || skin == Skin::Linux; // arrangeChrome: bare = inFull || terminal
-        let pointer_at_top = ctx.input(|i| i.pointer.hover_pos().is_some_and(|p| p.y < 6.0));
+        // egui cannot see the pointer above its content, and the titlebar sits there, so the top-edge
+        // check reads the global mouse position from AppKit.
+        let pointer_at_top = fullscreen && pointer_near_screen_top();
         let show_float = fullscreen && skin != Skin::Linux
             && (self.last_motion.elapsed().as_secs_f32() < FLOAT_HIDE_SECS || ctx.any_popup_open());
 
@@ -1305,6 +1315,15 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// True when the mouse is within a few points of the top of the main screen.
+fn pointer_near_screen_top() -> bool {
+    let Some(mtm) = MainThreadMarker::new() else { return false };
+    let mouse = unsafe { objc2_app_kit::NSEvent::mouseLocation() };
+    let Some(screen) = objc2_app_kit::NSScreen::mainScreen(mtm) else { return false };
+    let top = screen.frame().size.height;
+    mouse.y > top - 6.0
 }
 
 /// Opens a web link in the default browser. The app does not control the browser's window state.
