@@ -55,19 +55,56 @@ pub(crate) fn guide(p: &Player) -> String {
     events.into_iter().collect::<Vec<_>>().join("\n")
 }
 
+pub(crate) fn programme_options(p: &Player) -> Vec<(String, String)> {
+    let Some((item, false)) = p.current.and_then(|i| p.queue.get(i)) else {
+        return Vec::new();
+    };
+    let Ok(file) = File::open(&*item.to_string_lossy()) else {
+        return Vec::new();
+    };
+    // Reading a bounded prefix keeps opening the programme menu inexpensive.
+    let mut bytes = Vec::new();
+    if file.take(256 * 1024).read_to_end(&mut bytes).is_err() {
+        return Vec::new();
+    }
+    let mut ids = BTreeSet::new();
+    scan_sections(&bytes, 0, |table| {
+        if table[0] != 0 || table.len() < 12 || table[5] & 1 == 0 {
+            return;
+        }
+        for entry in table[8..table.len() - 4].chunks_exact(4) {
+            let id = u16::from_be_bytes([entry[0], entry[1]]);
+            if id != 0 {
+                ids.insert(id);
+            }
+        }
+    });
+    ids.into_iter()
+        .map(|id| (id.to_string(), format!("Programme {id}")))
+        .collect()
+}
+
 fn programmes(data: &[u8]) -> BTreeSet<String> {
     let mut events = BTreeSet::new();
+    scan_sections(data, 0x12, |buf| parse_events(buf, &mut events));
+    events
+}
+
+fn scan_sections(data: &[u8], pid: u16, mut visit: impl FnMut(&[u8])) {
     let Some((start, stride)) = [188, 192, 204].into_iter().find_map(|stride| {
         (0..stride)
             .find(|&i| (0..3).all(|n| data.get(i + n * stride) == Some(&0x47)))
             .map(|i| (i, stride))
     }) else {
-        return events;
+        return;
     };
     let mut section = Vec::new();
     let mut previous = None;
     for packet in data[start..].chunks(stride).filter_map(|p| p.get(..188)) {
-        if packet[0] != 0x47 || packet[1] & 0x9f != 0 || packet[2] != 0x12 || packet[3] & 0x10 == 0
+        if packet[0] != 0x47
+            || packet[1] & 0x80 != 0
+            || u16::from_be_bytes([packet[1] & 0x1f, packet[2]]) != pid
+            || packet[3] & 0x10 == 0
         {
             continue;
         }
@@ -98,7 +135,7 @@ fn programmes(data: &[u8]) -> BTreeSet<String> {
             };
             if !section.is_empty() {
                 section.extend_from_slice(tail);
-                parse_sections(&mut section, &mut events);
+                parse_sections(&mut section, &mut visit);
             }
             section.clear();
             payload = next;
@@ -106,12 +143,11 @@ fn programmes(data: &[u8]) -> BTreeSet<String> {
             continue;
         }
         section.extend_from_slice(payload);
-        parse_sections(&mut section, &mut events);
+        parse_sections(&mut section, &mut visit);
     }
-    events
 }
 
-fn parse_sections(buf: &mut Vec<u8>, events: &mut BTreeSet<String>) {
+fn parse_sections(buf: &mut Vec<u8>, visit: &mut impl FnMut(&[u8])) {
     while buf.len() >= 3 {
         if buf[0] == 0xff {
             buf.clear();
@@ -121,45 +157,50 @@ fn parse_sections(buf: &mut Vec<u8>, events: &mut BTreeSet<String>) {
         if buf.len() < size {
             return;
         }
-        if (0x4e..=0x6f).contains(&buf[0]) && size >= 18 && buf[5] & 1 != 0 {
-            let service = u16::from_be_bytes([buf[3], buf[4]]);
-            let mut entries = &buf[14..size - 4];
-            while let Some(header) = entries.get(..12) {
-                let n = usize::from(u16::from_be_bytes([header[10] & 15, header[11]]));
-                let Some((mut descriptors, rest)) = entries[12..].split_at_checked(n) else {
+        visit(&buf[..size]);
+        buf.drain(..size);
+    }
+}
+
+fn parse_events(buf: &[u8], events: &mut BTreeSet<String>) {
+    let size = buf.len();
+    if (0x4e..=0x6f).contains(&buf[0]) && size >= 18 && buf[5] & 1 != 0 {
+        let service = u16::from_be_bytes([buf[3], buf[4]]);
+        let mut entries = &buf[14..size - 4];
+        while let Some(header) = entries.get(..12) {
+            let n = usize::from(u16::from_be_bytes([header[10] & 15, header[11]]));
+            let Some((mut descriptors, rest)) = entries[12..].split_at_checked(n) else {
+                break;
+            };
+            entries = rest;
+            while descriptors.len() >= 2 {
+                let tag = descriptors[0];
+                let Some((value, rest)) =
+                    descriptors[2..].split_at_checked(descriptors[1] as usize)
+                else {
                     break;
                 };
-                entries = rest;
-                while descriptors.len() >= 2 {
-                    let tag = descriptors[0];
-                    let Some((value, rest)) =
-                        descriptors[2..].split_at_checked(descriptors[1] as usize)
-                    else {
-                        break;
-                    };
-                    descriptors = rest;
-                    if tag != 0x4d || value.len() < 5 {
-                        continue;
-                    }
-                    let Some(title) = value[4..].get(..value[3] as usize) else {
-                        continue;
-                    };
-                    let title = if title.first() == Some(&0x15) {
-                        &title[1..]
-                    } else {
-                        title
-                    };
-                    let title = String::from_utf8_lossy(title);
-                    let day = u16::from_be_bytes([header[2], header[3]]);
-                    let (y, m, d) = date(day);
-                    events.insert(format!(
-                        "{y:04}-{m:02}-{d:02} {:02x}:{:02x} UTC   {title}   (service {service})",
-                        header[4], header[5]
-                    ));
+                descriptors = rest;
+                if tag != 0x4d || value.len() < 5 {
+                    continue;
                 }
+                let Some(title) = value[4..].get(..value[3] as usize) else {
+                    continue;
+                };
+                let title = if title.first() == Some(&0x15) {
+                    &title[1..]
+                } else {
+                    title
+                };
+                let title = String::from_utf8_lossy(title);
+                let day = u16::from_be_bytes([header[2], header[3]]);
+                let (y, m, d) = date(day);
+                events.insert(format!(
+                    "{y:04}-{m:02}-{d:02} {:02x}:{:02x} UTC   {title}   (service {service})",
+                    header[4], header[5]
+                ));
             }
         }
-        buf.drain(..size);
     }
 }
 
