@@ -106,6 +106,11 @@ static void runTerminalInput(bool complete){
   if(result&&*result){appendTerminalText(result);if(result[wcslen(result)-1]!=L'\n')appendTerminalText(L"\r\n");}
   if(!result)appendTerminalText(L"RMP could not process the command.\r\n");
   refreshTerminalPrompt();
+  if(action==9 || (action>=10 && action<10+THEME_COUNT)){
+   int choice=action==9?previousTheme():action-10;
+   SendMessageW(mainwin,WM_COMMAND,THEME_FIRST+choice,0);
+   if(choice!=LINUX_THEME)SetForegroundWindow(mainwin);
+  }
   switch(action){
    case 1:PostMessageW(mainwin,WM_COMMAND,FULL,0);break;
    case 3:showCurrentTrack();break;

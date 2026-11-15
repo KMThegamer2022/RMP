@@ -31,7 +31,7 @@ Open **Theme** in the macOS menu bar or the Windows player’s menu bar. The Win
 
 New installations start with the VLC theme. Windows 10/11, Mac and RMP Default are also available. Changing themes keeps the current media and playback position. RMP remembers the selection on this computer.
 
-Select **Theme → Linux** to open the RMP command window beside the playback window. Switching themes keeps the current track playing. Type `help` for the built-in commands. For example, use `cd ~/Music`, then `ls`, then `play "Live Set.flac"`. Tab completes filenames and the up arrow recalls earlier commands. The terminal interprets input inside RMP and has no system shell or program launcher.
+Select **Theme → Linux** to open the RMP command window beside the playback window. Switching themes keeps the current track playing. Type `help` for the built-in commands. For example, use `cd ~/Music`, then `ls`, then `play "Live Set.flac"`. Use `theme back` to restore your previous theme or `theme vlc` to switch directly. Tab completes filenames and the up arrow recalls earlier commands. The terminal interprets input inside RMP and has no system shell or program launcher.
 
 The Windows 7 theme on Windows uses DwmExtendFrameIntoClientArea with only a bottom margin. Windows and the installed compositor determine the appearance. On macOS the playback bar uses a behind-window visual effect while transparency is enabled. Window management buttons and system dialogs follow the host OS.
 

@@ -104,6 +104,12 @@ static NSString *takeTerminalString(char *text){
  if(action==2){terminalTranscript.string=@"";[self fitTerminalText];}
  if(output.length)[self appendTerminal:[output hasSuffix:@"\n"]?output:[output stringByAppendingString:@"\n"] color:terminalInput.textColor];
  terminalPrompt.stringValue=takeTerminalString(ap_terminal_prompt(p));
+ if(action==9 || (action>=10 && action<10+THEME_COUNT)){
+  NSNumber *previous=[NSUserDefaults.standardUserDefaults objectForKey:@"PreviousTheme"];
+  NSInteger choice=action==9?(previous?previous.integerValue:VLC_THEME):action-10;
+  if(choice<0 || choice>=THEME_COUNT || (action==9 && choice==LINUX_THEME))choice=VLC_THEME;
+  [self pickTheme:[themeMenu itemWithTag:choice]];
+ }
  if(action==1){[window makeKeyAndOrderFront:nil];[self full:nil];}
  if(action==3 && ap_index(p)>=0)[self showPlayingItem:(NSUInteger)ap_index(p)];
  if(action==4){volume.intValue=ap_terminal_volume(p);if(fv)fv.intValue=volume.intValue;}

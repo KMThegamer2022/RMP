@@ -5,6 +5,7 @@ use std::path::{PathBuf, MAIN_SEPARATOR};
 
 const COMMANDS: &[&str] = &[
     "help",
+    "theme",
     "pwd",
     "ls",
     "cd",
@@ -20,7 +21,7 @@ const COMMANDS: &[&str] = &[
     "next",
     "prev",
 ];
-const HELP: &str = "pwd              Show current folder\nls [folder]      List files\ncd [folder]      Change folder (default: home)\nplay FILE        Play a local file\npause / resume   Pause or resume playback\nstop             Stop playback\nseek M:SS        Jump to a time\nvolume [0-100]   Show or set volume\nqueue            List queued tracks\nnext / prev      Play an adjacent queued track\nfullscreen       Toggle fullscreen\nclear            Clear the terminal\nhelp             Show these commands";
+const HELP: &str = "pwd              Show current folder\nls [folder]      List files\ncd [folder]      Change folder (default: home)\nplay FILE        Play a local file\npause / resume   Pause or resume playback\nstop             Stop playback\nseek M:SS        Jump to a time\nvolume [0-100]   Show or set volume\nqueue            List queued tracks\nnext / prev      Play an adjacent queued track\nfullscreen       Toggle fullscreen\ntheme [name]     List themes or switch (theme back returns)\nclear            Clear the terminal\nhelp             Show these commands";
 
 pub struct Terminal {
     cwd: PathBuf,
@@ -239,6 +240,28 @@ unsafe fn run(p: &mut Player, line: &str) -> (i32, String) {
     let mut action = 0;
     let text = match cmd {
         "help" if arg.is_empty() => HELP.into(),
+        "theme" => {
+            let name = arg.to_ascii_lowercase();
+            match name.as_str() {
+                "" => "Themes: VLC, RMP Default, Windows 10/11, Windows 7, Windows XP, Mac, Linux.\nUse theme NAME to switch or theme back to return.".into(),
+                "back" | "previous" => { action = 9; "Returning to previous theme.".into() }
+                _ => {
+                    // Action 10 + the stable menu preference ID (themes.h).
+                    let id = match name.as_str() {
+                        "windows 10/11" | "windows 10" | "windows 11" | "win10" | "win11" => 0,
+                        "windows 7" | "win7" => 1,
+                        "windows xp" | "xp" => 2,
+                        "mac" | "macos" => 3,
+                        "rmp default" | "rmp" | "default" => 4,
+                        "vlc" => 5,
+                        "linux" => 6,
+                        _ => return (0, "Unknown theme. Type theme to list your choices.".into()),
+                    };
+                    action = 10 + id;
+                    format!("Theme: {arg}")
+                }
+            }
+        }
         "pwd" if arg.is_empty() => p.terminal.display_path(),
         "ls" => p.terminal.list(arg).unwrap_or_else(|e| e),
         "cd" => p.terminal.cd(arg).unwrap_or_else(|e| e),
@@ -478,6 +501,11 @@ mod tests {
             assert_eq!(run(p, "volume 37"), (4, "Volume 37%".into()));
             assert_eq!(run(p, "volume 101").0, 0);
             assert_eq!(p.volume, 37);
+            assert_eq!(run(p, "theme").0, 0);
+            assert_eq!(run(p, "theme back").0, 9);
+            assert_eq!(run(p, "theme Windows 7").0, 11);
+            assert_eq!(run(p, "theme VLC").0, 15);
+            assert_eq!(run(p, "theme nope").0, 0);
             assert_eq!(run(p, "fullscreen").0, 1);
             assert_eq!(run(p, "clear").0, 2);
             assert_eq!(run(p, "pause").0, 0);

@@ -340,7 +340,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case ADD_FILE:openfile();return 0;
  case SHOW_TERMINAL:revealTerminal();return 0;
  }
- if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;if(value==LINUX_THEME&&skin==value)PostMessageW(w,REVEAL_TERMINAL,0,0);applyTheme(w,value);storeTheme(value);return 0;}
+ if(LOWORD(wp)>=THEME_FIRST && LOWORD(wp)<THEME_FIRST+THEME_COUNT){int value=LOWORD(wp)-THEME_FIRST;if(value==LINUX_THEME && skin!=LINUX_THEME)storeTheme(skin);if(value==LINUX_THEME&&skin==value)PostMessageW(w,REVEAL_TERMINAL,0,0);applyTheme(w,value);storeTheme(value);return 0;}
  switch(LOWORD(wp)){case 490:if(!launchCheck(true))MessageBoxW(w,L"The update helper could not start. Reinstall RMP to restore it.",L"RMP update",MB_ICONERROR);break;case LIST:{RECT r;GetWindowRect(GetDlgItem(fullscreen?transport:w,LIST),&r);TrackPopupMenu(queue,TPM_LEFTALIGN|TPM_BOTTOMALIGN,r.left,r.top,0,w,NULL);break;}
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
  case SHUFFLE:shuffle=!shuffle;SetWindowTextW((HWND)lp,shuffle?L"⤨✓":L"⤨");break;

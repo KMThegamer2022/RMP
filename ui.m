@@ -159,6 +159,7 @@ static NSTextField *label(NSString *text,CGFloat size,BOOL bold){
  for(NSMenuItem *entry in themeMenu.itemArray)entry.state=entry.tag==skin?NSControlStateValueOn:NSControlStateValueOff;
 }
 -(void)pickTheme:(NSMenuItem *)entry {
+ if(entry.tag==LINUX_THEME && skin!=LINUX_THEME)[NSUserDefaults.standardUserDefaults setInteger:skin forKey:@"PreviousTheme"];
  [self applyTheme:entry.tag];[NSUserDefaults.standardUserDefaults setInteger:skin forKey:@"PlayerTheme"];
 }
 -(NSStackView *)row:(NSArray *)views{

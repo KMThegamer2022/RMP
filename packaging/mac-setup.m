@@ -19,6 +19,7 @@ int main(void){@autoreleasepool{
  if([fm fileExistsAtPath:dest]) [fm replaceItemAtURL:[NSURL fileURLWithPath:dest] withItemAtURL:[NSURL fileURLWithPath:stage] backupItemName:nil options:0 resultingItemURL:nil error:&err];
  else [fm moveItemAtPath:stage toPath:dest error:&err];}
  if(err){[fm removeItemAtPath:stage error:nil];[[NSAlert alertWithError:err]runModal];return 1;}
- for(NSButton *b in buttons)if(b.state==NSControlStateValueOn){CFPreferencesSetAppValue(CFSTR("PlayerTheme"),(__bridge CFNumberRef)@(b.tag),CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));break;}
+ for(NSButton *b in buttons)if(b.state==NSControlStateValueOn){if(b.tag!=6 || selected!=6)CFPreferencesSetAppValue(CFSTR("PreviousTheme"),(__bridge CFNumberRef)@(b.tag==6?selected:b.tag),CFSTR("io.github.kmthegamer2022.rmp"));
+ CFPreferencesSetAppValue(CFSTR("PlayerTheme"),(__bridge CFNumberRef)@(b.tag),CFSTR("io.github.kmthegamer2022.rmp"));CFPreferencesAppSynchronize(CFSTR("io.github.kmthegamer2022.rmp"));break;}
  [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:dest]];return 0;
 }}

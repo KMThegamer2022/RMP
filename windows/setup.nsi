@@ -12,7 +12,7 @@ Var Theme3
 Var Theme6
 Var Theme5
 Var Theme4
-Name "RMP · Rust Media Player"
+Name "RMP - Rust Media Player"
 OutFile "../RMP-Setup-x64.exe"
 InstallDir "$LOCALAPPDATA\Programs\RMP"
 RequestExecutionLevel user
@@ -28,39 +28,39 @@ Function ThemePage
  !insertmacro MUI_HEADER_TEXT "Choose a player theme" "Choose how RMP looks when it opens."
  nsDialogs::Create 1018
  Pop $0
- ${NSD_CreateLabel} 0 4u 100% 28u "Select one theme. You can change it later from the Theme menu in the window menu bar."
+ ${NSD_CreateLabel} 0 0u 100% 18u "You can change this later from the Theme menu."
  Pop $0
- ${NSD_CreateRadioButton} 8u 25u 90% 13u "VLC"
+ ${NSD_CreateRadioButton} 8u 24u 90% 13u "VLC"
  Pop $Theme5
  ${If} $ThemeChoice == 5
   ${NSD_Check} $Theme5
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 44u 90% 14u "RMP Default"
+ ${NSD_CreateRadioButton} 8u 40u 90% 14u "RMP Default"
  Pop $Theme4
  ${If} $ThemeChoice == 4
   ${NSD_Check} $Theme4
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 61u 90% 14u "Windows 10/11"
+ ${NSD_CreateRadioButton} 8u 56u 90% 14u "Windows 10/11"
  Pop $Theme0
  ${If} $ThemeChoice == 0
   ${NSD_Check} $Theme0
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 78u 90% 14u "Windows 7"
+ ${NSD_CreateRadioButton} 8u 72u 90% 14u "Windows 7"
  Pop $Theme1
  ${If} $ThemeChoice == 1
   ${NSD_Check} $Theme1
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 95u 90% 14u "Windows XP"
+ ${NSD_CreateRadioButton} 8u 88u 90% 14u "Windows XP"
  Pop $Theme2
  ${If} $ThemeChoice == 2
   ${NSD_Check} $Theme2
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 112u 90% 14u "Mac"
+ ${NSD_CreateRadioButton} 8u 104u 90% 14u "Mac"
  Pop $Theme3
  ${If} $ThemeChoice == 3
   ${NSD_Check} $Theme3
  ${EndIf}
- ${NSD_CreateRadioButton} 8u 129u 90% 14u "Linux"
+ ${NSD_CreateRadioButton} 8u 120u 90% 14u "Linux"
  Pop $Theme6
  ${If} $ThemeChoice == 6
   ${NSD_Check} $Theme6
@@ -113,6 +113,15 @@ Function .onInit
  ${EndIf}
 FunctionEnd
 Section
+ ${If} $ThemeChoice == 6
+  ReadRegDWORD $0 HKCU "Software\RMP" "Theme"
+  ${IfNot} ${Errors}
+  ${AndIf} $0 < 6
+   WriteRegDWORD HKCU "Software\RMP" "PreviousTheme" $0
+  ${EndIf}
+ ${Else}
+  WriteRegDWORD HKCU "Software\RMP" "PreviousTheme" $ThemeChoice
+ ${EndIf}
  WriteRegDWORD HKCU "Software\RMP" "Theme" $ThemeChoice
  WriteRegStr HKCU "Software\Classes\RMP.Media" "" "RMP media file"
  WriteRegStr HKCU "Software\Classes\RMP.Media\DefaultIcon" "" '"$INSTDIR\RMP.exe",0'
@@ -125,7 +134,7 @@ Section
  File /r "..\build\RMP\*.*"
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
- WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP · Rust Media Player"
+ WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP - Rust Media Player"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "3.1.0"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'

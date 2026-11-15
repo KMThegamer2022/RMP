@@ -95,6 +95,7 @@ jobs:
           $entries | Set-Content windows/uninstall-files.nsh
           & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" windows/setup.nsi
           if ($LASTEXITCODE) { throw 'Installer build failed' }
+          ./windows/test-installer-layout.ps1 ./RMP-Setup-x64.exe
           $p = Start-Process ./RMP-Setup-x64.exe -ArgumentList '/S' -PassThru -Wait
           if ($p.ExitCode) { throw 'Install failed' }
           if ((Get-ItemPropertyValue HKCU:/Software/RMP/Capabilities/FileAssociations '.mkv') -ne 'RMP.Media') { throw 'Media registration failed' }
@@ -118,6 +119,7 @@ jobs:
           path: |
             RMP-Windows-x64.zip
             RMP-Setup-x64.exe
+            RMP-Installer-preview.png
             RMP-XP-preview.png
             RMP-Windows7-preview.png
             RMP-VLC-preview.png

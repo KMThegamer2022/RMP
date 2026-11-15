@@ -11,9 +11,15 @@ static int savedTheme(void){
  if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"Theme",RRF_RT_REG_DWORD,NULL,&value,&size)!=ERROR_SUCCESS || value>=THEME_COUNT)return VLC_THEME;
  return (int)value;
 }
+static int previousTheme(void){
+ DWORD value=VLC_THEME,size=sizeof(value);
+ if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\RMP",L"PreviousTheme",RRF_RT_REG_DWORD,NULL,&value,&size)!=ERROR_SUCCESS || value>=LINUX_THEME)return VLC_THEME;
+ return (int)value;
+}
 static void storeTheme(int value){
  HKEY key;if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\RMP",0,NULL,0,KEY_SET_VALUE,NULL,&key,NULL)==ERROR_SUCCESS){
- DWORD d=value;RegSetValueExW(key,L"Theme",0,REG_DWORD,(BYTE*)&d,sizeof(d));RegCloseKey(key);}
+ DWORD d=value;if(value!=LINUX_THEME)RegSetValueExW(key,L"PreviousTheme",0,REG_DWORD,(BYTE*)&d,sizeof(d));
+ RegSetValueExW(key,L"Theme",0,REG_DWORD,(BYTE*)&d,sizeof(d));RegCloseKey(key);}
 }
 static void fillColor(HDC dc,RECT r,COLORREF c){SetDCBrushColor(dc,c);FillRect(dc,&r,GetStockObject(DC_BRUSH));}
 static void blend(HDC dc,RECT r,unsigned a,unsigned b){
