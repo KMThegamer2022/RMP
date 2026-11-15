@@ -35,9 +35,19 @@ function Get-Window($p) {
 }
 function Check-Menu($w,$id) {
  $bar=[ThemeTest]::GetMenu($w)
- $menu=[ThemeTest]::GetSubMenu($bar,([ThemeTest]::GetMenuItemCount($bar)-1))
- $state=[ThemeTest]::GetMenuState($menu,$id,0)
- if ($state -eq [uint32]::MaxValue -or !($state -band 8)){throw "Missing checkmark for theme $id"}
+ for ($b=0;$b -lt [ThemeTest]::GetMenuItemCount($bar);$b++) {
+  $top=[ThemeTest]::GetSubMenu($bar,$b)
+  if (!$top){continue}
+  $state=[ThemeTest]::GetMenuState($top,$id,0)
+  if ($state -ne [uint32]::MaxValue) {if (!($state -band 8)){throw "Missing checkmark for theme $id"};return}
+  for ($i=0;$i -lt [ThemeTest]::GetMenuItemCount($top);$i++) {
+   $sub=[ThemeTest]::GetSubMenu($top,$i)
+   if (!$sub){continue}
+   $state=[ThemeTest]::GetMenuState($sub,$id,0)
+   if ($state -ne [uint32]::MaxValue) {if (!($state -band 8)){throw "Missing checkmark for theme $id"};return}
+  }
+ }
+ throw "Theme $id is not in the menus"
 }
 $tagFile=(Resolve-Path 'packaging/fixtures/embedded-tags.mp3').Path
 $p=Start-Process $Player -ArgumentList $Fixture,$tagFile -PassThru
