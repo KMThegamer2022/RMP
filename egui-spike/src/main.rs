@@ -46,6 +46,7 @@ const CLOCK_W: f32 = 84.0;
 const VOLUME_W: f32 = 85.0;
 const CONE_SIZE: f32 = 120.0;
 const CONE_PNG: &[u8] = include_bytes!("../../assets/vlc-cone.png");
+const LINK_TARGET: &str = "https://www.youtube.com/watch?v=yEh_4GqXqFc";
 const LOGO_PNG: &[u8] = include_bytes!("../../assets/RMP.png");
 /// Size of the logo shown when paused or stopped (pausedMark in ui.m).
 const MARK_SIZE: f32 = 96.0;
@@ -708,7 +709,7 @@ impl eframe::App for App {
             )
         });
         if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
-            self.play_bundled_clip(&ctx);
+            open_link(LINK_TARGET);
         }
         let typing = ctx.memory(|m| m.focused().is_some());
         if !typing {
@@ -1125,27 +1126,6 @@ impl App {
 }
 
 impl App {
-    /// Fullscreen playback of the clip bundled with the app (resources/clip.mp4).
-    fn play_bundled_clip(&mut self, ctx: &egui::Context) {
-        let Some(path) = bundled_resource("clip.mp4") else { return };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
-        self.open_file(path);
-    }
-}
-
-/// Finds a file in the app's resources: beside the executable, in an app bundle's Resources folder,
-/// or in this crate's resources folder during development.
-fn bundled_resource(name: &str) -> Option<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)) {
-        candidates.push(dir.join("resources").join(name));
-        candidates.push(dir.join("../Resources").join(name));
-    }
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join(name));
-    candidates.into_iter().find(|p| p.is_file())
-}
-
-impl App {
     /// Floating transport shown in fullscreen (showFloatingTransport in mac-fullscreen.h): seek bar,
     /// Previous, Play/Pause, Next, volume, and Exit Full Screen.
     fn draw_floating_transport(&mut self, ui: &mut egui::Ui, th: &Theme, state: i32) {
@@ -1325,6 +1305,11 @@ impl App {
             _ => {}
         }
     }
+}
+
+/// Opens a web link in the default browser. The app does not control the browser's window state.
+fn open_link(url: &str) {
+    let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
 fn prompt_kind(title: &str) -> bool {
