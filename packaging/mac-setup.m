@@ -2,7 +2,7 @@
 int main(void){@autoreleasepool{
  [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];
  NSAlert *a=[NSAlert new];a.messageText=@"Install Rust Media Player";
- a.informativeText=@"Install RMP in your Applications folder. Choose one theme to start with. You can change it anytime from the Theme menu in the macOS menu bar.";
+ a.informativeText=@"Install RMP in your Applications folder. Choose one theme to start with. You can change it anytime under View → Theme in the macOS menu bar.";
  NSArray *names=@[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac",@"Linux"];
  NSArray<NSNumber *> *tags=@[@5,@4,@0,@1,@2,@3,@6];
  NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,183)];

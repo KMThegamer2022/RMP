@@ -28,7 +28,7 @@ Function ThemePage
  !insertmacro MUI_HEADER_TEXT "Choose a player theme" "Choose how RMP looks when it opens."
  nsDialogs::Create 1018
  Pop $0
- ${NSD_CreateLabel} 0 0u 100% 18u "You can change this later from the Theme menu."
+ ${NSD_CreateLabel} 0 0u 100% 18u "You can change this later under View > Theme."
  Pop $0
  ${NSD_CreateRadioButton} 8u 24u 90% 13u "VLC"
  Pop $Theme5

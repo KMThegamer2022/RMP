@@ -58,7 +58,7 @@ try {
   if($p.HasExited -or $timer.ElapsedMilliseconds -gt 15000){throw 'The graphical installer did not display seven theme choices'}
   if(!$dialog.ToInt64()){Start-Sleep -Milliseconds 100}
  }until($dialog.ToInt64())
- $labels=@($children|Where-Object {[InstallerUI]::Class($_) -eq 'Static' -and [InstallerUI]::Text($_) -like '*Theme menu*'})
+ $labels=@($children|Where-Object {[InstallerUI]::Class($_) -eq 'Static' -and [InstallerUI]::Text($_) -like '*View > Theme*'})
  if($labels.Count -ne 1){throw 'Theme instructions are missing'}
  $label=[InstallerUI]::Bounds($labels[0])
  $page=[InstallerUI]::GetParent($labels[0])
