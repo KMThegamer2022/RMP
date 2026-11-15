@@ -170,6 +170,8 @@ fn save_skin(skin: Skin) {
 struct App {
     player: *mut engine::Player,
     video_view: Option<Retained<NSView>>,
+    /// winit's content view (egui draws into it); the video view sits behind it in the frame view.
+    content_view: Option<Retained<NSView>>,
     cone: Option<egui::TextureHandle>,
     file: Option<PathBuf>,
     status: String,
@@ -226,6 +228,7 @@ impl App {
         Self {
             player: std::ptr::null_mut(),
             video_view: None,
+            content_view: None,
             cone: None,
             file: None,
             status: "Ready".into(),
@@ -374,7 +377,13 @@ impl App {
             NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)))
         };
         child.setWantsLayer(true);
-        parent.addSubview(&child);
+        // Behind the egui view, in the window's frame view. egui draws its controls and menus on top,
+        // and the egui view is clear over the screen rect, so the video shows through and stays visible
+        // while a menu is open.
+        let Some(frame_view) = (unsafe { parent.superview() }) else { return };
+        frame_view.addSubview_positioned_relativeTo(&child, objc2_app_kit::NSWindowOrderingMode::Below, Some(parent));
+        // SAFETY: winit's content view stays alive while the window does; we keep a retained handle.
+        self.content_view = Some(unsafe { Retained::retain(parent as *const NSView as *mut NSView) }.expect("content view"));
         let raw = Retained::as_ptr(&child) as *mut c_void;
         self.player = unsafe { engine::ap_create(raw) };
         if let Some(p) = self.player() {
@@ -386,17 +395,20 @@ impl App {
 
     /// Moves the video view to `rect` (egui points, top-left origin) inside the content view.
     fn place_video(&self, rect: Rect) {
-        let Some(view) = &self.video_view else { return };
-        let Some(parent) = (unsafe { view.superview() }) else { return };
-        let y = if parent.isFlipped() {
+        let (Some(view), Some(content)) = (&self.video_view, &self.content_view) else { return };
+        let Some(frame_view) = (unsafe { view.superview() }) else { return };
+        // The rect is in egui's coordinates, relative to the content view.
+        let y = if content.isFlipped() {
             rect.min.y
         } else {
-            parent.bounds().size.height as f32 - rect.max.y
+            content.bounds().size.height as f32 - rect.max.y
         };
-        view.setFrame(NSRect::new(
+        let in_content = NSRect::new(
             NSPoint::new(rect.min.x as f64, y as f64),
             NSSize::new(rect.width() as f64, rect.height() as f64),
-        ));
+        );
+        let in_frame = content.convertRect_toView(in_content, Some(&frame_view));
+        view.setFrame(in_frame);
     }
 
     /// Title bar and window appearance for the current skin (ThemeSurface / applyTheme in ui.m).
@@ -622,6 +634,11 @@ fn wedge(ui: &mut egui::Ui, value: &mut i32) -> bool {
 }
 
 impl eframe::App for App {
+    /// Fully clear so the video layered beneath shows through the screen rect unchanged.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0; 4]
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.player.is_null() {
@@ -664,6 +681,9 @@ impl eframe::App for App {
                 i.key_pressed(egui::Key::CloseBracket),
             )
         });
+        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
+            self.play_bundled_clip(&ctx);
+        }
         let typing = ctx.memory(|m| m.focused().is_some());
         if !typing {
             if cmd && key_o && !shift {
@@ -732,26 +752,6 @@ impl eframe::App for App {
         let (w, h) = (full.width(), full.height());
         // Everything below is laid out relative to `full`, which starts under the menu bar.
         let origin = full.min.to_vec2();
-        ui.painter().rect_filled(full, 0.0, th.panel);
-        if skin == Skin::Seven {
-            vgradient(
-                ui.painter(),
-                full,
-                &[(0.0, th.panel), (0.33, rgb(0xf2faff)), (0.66, rgb(0xa2c6e3)), (1.0, th.panel)],
-            );
-        }
-        if skin == Skin::Xp {
-            vgradient(
-                ui.painter(),
-                Rect::from_min_size(full.min, Vec2::new(w, 84.0)),
-                &[(0.0, rgb(0x7588b0)), (0.33, rgb(0xe1e7f1)), (0.66, rgb(0xfbfcff)), (1.0, rgb(0x869ac4))],
-            );
-            vgradient(
-                ui.painter(),
-                Rect::from_min_size(full.min, Vec2::new(w, 58.0)),
-                &[(0.0, rgb(0x1244b5)), (0.33, rgb(0x1260e9)), (0.66, rgb(0x0058e5)), (1.0, rgb(0x4796ff))],
-            );
-        }
         let ink = match skin {
             Skin::Xp => Color32::WHITE,
             Skin::Modern => rgb(0x181818),
@@ -783,11 +783,44 @@ impl eframe::App for App {
 
         // Screen: black, with the cone in the VLC skin while idle (ui.m `cone`).
         let screen = Rect::from_min_max(Pos2::new(0.0, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin);
+        // Panel backgrounds cover everything except the video screen, which stays clear so the video
+        // layered beneath egui shows through.
+        let above = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top()));
+        let below = Rect::from_min_max(Pos2::new(full.left(), screen.bottom()), full.max);
+        for region in [above, below] {
+            if region.height() <= 0.0 {
+                continue;
+            }
+            let p = ui.painter().with_clip_rect(region);
+            p.rect_filled(region, 0.0, th.panel);
+            if skin == Skin::Seven {
+                vgradient(&p, full, &[(0.0, th.panel), (0.33, rgb(0xf2faff)), (0.66, rgb(0xa2c6e3)), (1.0, th.panel)]);
+            }
+            if skin == Skin::Xp {
+                vgradient(
+                    &p,
+                    Rect::from_min_size(full.min, Vec2::new(w, 84.0)),
+                    &[(0.0, rgb(0x7588b0)), (0.33, rgb(0xe1e7f1)), (0.66, rgb(0xfbfcff)), (1.0, rgb(0x869ac4))],
+                );
+                vgradient(
+                    &p,
+                    Rect::from_min_size(full.min, Vec2::new(w, 58.0)),
+                    &[(0.0, rgb(0x1244b5)), (0.33, rgb(0x1260e9)), (0.66, rgb(0x0058e5)), (1.0, rgb(0x4796ff))],
+                );
+            }
+        }
         let idle = match self.player() {
             Some(p) => (unsafe { engine::ap_index(p) }) < 0,
             None => true,
         };
-        ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
+        // Black unless libvlc has a video output; that output draws into the layered view beneath egui.
+        let has_video = match self.player() {
+            Some(p) => unsafe { engine::ap_has_video(p) },
+            None => false,
+        };
+        if !has_video {
+            ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
+        }
         match skin {
             Skin::Seven => {
                 ui.painter().rect_stroke(screen, 0.0, Stroke::new(2.0, rgb(0x829db5)), egui::StrokeKind::Inside);
@@ -802,10 +835,8 @@ impl eframe::App for App {
                 egui::Image::new(cone).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(CONE_SIZE)));
             }
         }
-        // The video is a native view above egui, so it would cover menus and dialogs. Hide it while one is open.
-        let overlay = self.note.is_some() || self.prompt.is_some() || ctx.any_popup_open();
         if let Some(view) = &self.video_view {
-            view.setHidden(idle || overlay);
+            view.setHidden(idle);
         }
         self.place_video(screen);
 
@@ -1012,6 +1043,27 @@ impl App {
     }
 }
 
+impl App {
+    /// Fullscreen playback of the clip bundled with the app (resources/clip.mp4).
+    fn play_bundled_clip(&mut self, ctx: &egui::Context) {
+        let Some(path) = bundled_resource("clip.mp4") else { return };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        self.open_file(path);
+    }
+}
+
+/// Finds a file in the app's resources: beside the executable, in an app bundle's Resources folder,
+/// or in this crate's resources folder during development.
+fn bundled_resource(name: &str) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(dir) = std::env::current_exe().ok().and_then(|exe| exe.parent().map(PathBuf::from)) {
+        candidates.push(dir.join("resources").join(name));
+        candidates.push(dir.join("../Resources").join(name));
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources").join(name));
+    candidates.into_iter().find(|p| p.is_file())
+}
+
 fn prompt_kind(title: &str) -> bool {
     title == "Open Network Stream"
 }
@@ -1077,7 +1129,8 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 570.0])
             .with_min_inner_size([720.0, 380.0])
-            .with_title("RMP"),
+            .with_title("RMP")
+            .with_transparent(true),
         ..Default::default()
     };
     eframe::run_native("RMP", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
