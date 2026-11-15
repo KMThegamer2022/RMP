@@ -177,6 +177,36 @@ static void enqueue(const wchar_t *s,bool url){
  char *out=malloc(n);if(out){WideCharToMultiByte(CP_UTF8,0,s,-1,out,n,NULL,NULL);ap_add(player,out,url);free(out);}
 }
 static const char *basename8(const char *s){const char *p=s;for(;*s;s++)if(*s=='/'||*s=='\\')p=s+1;return p;}
+/* Seek bar: the area a click or drag maps onto. Matches the track drawn for the VLC theme. */
+static RECT seekTrack(HWND h){
+ RECT r;
+ if(skin==VLC_THEME){GetClientRect(h,&r);InflateRect(&r,-scale(5),0);}
+ else SendMessageW(h,TBM_GETCHANNELRECT,0,(LPARAM)&r);
+ return r;
+}
+static int seekValueAt(HWND h,int x){
+ RECT r=seekTrack(h);int width=r.right-r.left;if(width<=0)return 0;
+ long long v=(long long)(x-r.left)*1000/width;return (int)(v<0?0:v>1000?1000:v);
+}
+static bool scrubbing;
+/* Mouse seeking: a click jumps to the exact point clicked; dragging previews and seeks on release. */
+static LRESULT CALLBACK seekProc(HWND h,UINT msg,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data){
+ (void)id;(void)data;
+ if(msg==WM_LBUTTONDOWN && ap_seekable(player) && IsWindowEnabled(h)){
+  scrubbing=dragging=true;SetCapture(h);
+  SendMessageW(h,TBM_SETPOS,TRUE,seekValueAt(h,(short)LOWORD(lp)));
+  SetFocus(h);return 0;
+ }
+ if(msg==WM_MOUSEMOVE && scrubbing){SendMessageW(h,TBM_SETPOS,TRUE,seekValueAt(h,(short)LOWORD(lp)));return 0;}
+ if(msg==WM_LBUTTONUP && scrubbing){
+  int value=seekValueAt(h,(short)LOWORD(lp));
+  scrubbing=dragging=false;ReleaseCapture();
+  SendMessageW(h,TBM_SETPOS,TRUE,value);
+  ap_seek(player,ap_length(player)*value/1000);return 0;
+ }
+ if(msg==WM_CAPTURECHANGED && scrubbing){scrubbing=dragging=false;}
+ return DefSubclassProc(h,msg,wp,lp);
+}
 static void start(size_t index){
  if(index>=ap_count(player))return;
  if(!ap_play(player,index)){MessageBoxW(mainwin,L"Could not open this media.",L"RMP",MB_ICONERROR);return;}
@@ -268,7 +298,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
 
  position=control(w,TRACKBAR_CLASSW,L"",SEEK,TBS_NOTICKS);level=control(w,TRACKBAR_CLASSW,L"",VOLUME,TBS_NOTICKS);SetWindowTextW(level,L"Volume");clocktext=control(w,L"STATIC",L"",0,SS_OWNERDRAW);
  makeMediaBrowser();
- SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
+ SendMessageW(position,TBM_SETRANGE,TRUE,MAKELONG(0,1000));SetWindowSubclass(position,seekProc,3,0);SendMessageW(level,TBM_SETPOS,TRUE,80);SetTimer(w,1,200,NULL);DragAcceptFiles(w,TRUE);applyTheme(w,savedTheme());return 0;}
 
  case REVEAL_TERMINAL:revealTerminal();return 0;
  case WM_MOUSEWHEEL:if(routeWheel(w,wp,lp))return 0;break;
@@ -357,7 +387,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  case REPEAT:repeatOne=!repeatOne;SetWindowTextW((HWND)lp,repeatOne?L"↻¹":L"↻");break;
  case SHUFFLE:shuffle=!shuffle;SetWindowTextW((HWND)lp,shuffle?L"⤨✓":L"⤨");break;
  case STOP:ap_stop(player);break;case OPEN:openfile();break;case PLAY:if(ap_count(player))ap_toggle(player);else openfile();break;case NEXT:nextItem();break;case PREV:start(ap_index(player)>0?ap_index(player)-1:0);break;case FULL:togglefull();break;case STREAM:DialogBoxW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(200),w,streamdlg);break;}return 0;
- case WM_HSCROLL:if((HWND)lp==level){volumePercent=SendMessageW(level,TBM_GETPOS,0,0);ap_volume(player,volumePercent);InvalidateRect(level,NULL,TRUE);}else if((HWND)lp==position){dragging=LOWORD(wp)==TB_THUMBTRACK;if(!dragging)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
+ case WM_HSCROLL:if((HWND)lp==level){volumePercent=SendMessageW(level,TBM_GETPOS,0,0);ap_volume(player,volumePercent);InvalidateRect(level,NULL,TRUE);}else if((HWND)lp==position){if(!scrubbing)ap_seek(player,ap_length(player)*SendMessageW(position,TBM_GETPOS,0,0)/1000);}return 0;
  case WM_TIMER:
  tick();
  if(smoke && ((ap_state(player)==3 && ap_time(player)>100) || GetTickCount64()>deadline)){
