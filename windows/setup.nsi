@@ -9,6 +9,7 @@ Var Theme1
 Var Theme2
 Var Theme3
 !include associations.nsh
+Var Theme6
 Var Theme5
 Var Theme4
 Name "RMP · Rust Media Player"
@@ -59,9 +60,18 @@ Function ThemePage
  ${If} $ThemeChoice == 3
   ${NSD_Check} $Theme3
  ${EndIf}
+ ${NSD_CreateRadioButton} 8u 129u 90% 14u "Linux"
+ Pop $Theme6
+ ${If} $ThemeChoice == 6
+  ${NSD_Check} $Theme6
+ ${EndIf}
  nsDialogs::Show
 FunctionEnd
 Function ThemeLeave
+ ${NSD_GetState} $Theme6 $0
+ ${If} $0 == ${BST_CHECKED}
+  StrCpy $ThemeChoice 6
+ ${EndIf}
  ${NSD_GetState} $Theme5 $0
  ${If} $0 == ${BST_CHECKED}
   StrCpy $ThemeChoice 5
@@ -90,7 +100,7 @@ FunctionEnd
 Function .onInit
  ReadRegDWORD $ThemeChoice HKCU "Software\RMP" "Theme"
  ${If} ${Errors}
- ${OrIf} $ThemeChoice > 5
+ ${OrIf} $ThemeChoice > 6
   StrCpy $ThemeChoice 5
  ${EndIf}
  ${IfNot} ${RunningX64}
@@ -116,7 +126,7 @@ Section
  WriteUninstaller "$INSTDIR\Uninstall.exe"
  CreateShortcut "$SMPROGRAMS\RMP.lnk" "$INSTDIR\RMP.exe"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayName" "RMP · Rust Media Player"
- WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "3.0.0"
+ WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "DisplayVersion" "3.1.0"
  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\RMP" "UninstallString" '"$INSTDIR\Uninstall.exe"'
  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd

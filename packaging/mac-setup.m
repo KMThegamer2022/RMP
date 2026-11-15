@@ -3,12 +3,13 @@ int main(void){@autoreleasepool{
  [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];[NSApp activateIgnoringOtherApps:YES];
  NSAlert *a=[NSAlert new];a.messageText=@"Install Rust Media Player";
  a.informativeText=@"Install RMP in your Applications folder. Choose one theme to start with. You can change it anytime from the Theme menu in the macOS menu bar.";
- NSArray *names=@[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac"];
- NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,158)];
+ NSArray *names=@[@"VLC",@"RMP Default",@"Windows 10/11",@"Windows 7",@"Windows XP",@"Mac",@"Linux"];
+ NSArray<NSNumber *> *tags=@[@5,@4,@0,@1,@2,@3,@6];
+ NSView *options=[[NSView alloc]initWithFrame:NSMakeRect(0,0,300,183)];
  NSDictionary *prefs=[NSUserDefaults.standardUserDefaults persistentDomainForName:@"io.github.kmthegamer2022.rmp"];
- NSNumber *stored=prefs[@"PlayerTheme"];NSInteger selected=stored && stored.integerValue>=0 && stored.integerValue<6?stored.integerValue:5;
+ NSNumber *stored=prefs[@"PlayerTheme"];NSInteger selected=stored && stored.integerValue>=0 && stored.integerValue<(NSInteger)tags.count?stored.integerValue:5;
  NSMutableArray *buttons=[NSMutableArray new];
- for(NSInteger i=0;i<6;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,131-i*25,280,24);b.tag=i==0?5:i==1?4:i-2;b.state=b.tag==selected;[options addSubview:b];[buttons addObject:b];}
+ for(NSInteger i=0;i<(NSInteger)tags.count;i++){NSButton *b=[NSButton radioButtonWithTitle:names[i] target:nil action:@selector(self)];b.frame=NSMakeRect(0,156-i*25,280,24);b.tag=tags[i].integerValue;b.state=b.tag==selected;[options addSubview:b];[buttons addObject:b];}
  a.accessoryView=options;[a addButtonWithTitle:@"Install"];[a addButtonWithTitle:@"Cancel"];if([a runModal]!=NSAlertFirstButtonReturn)return 0;
  NSFileManager *fm=NSFileManager.defaultManager;NSString *root=[NSHomeDirectory() stringByAppendingPathComponent:@"Applications"];
  NSString *dest=[root stringByAppendingPathComponent:@"RMP.app"];
