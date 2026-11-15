@@ -30,17 +30,44 @@ try {
 if([Windows.Forms.MessageBox]::Show(("RMP "+$best+" is available. Update now?"+[Environment]::NewLine+[Environment]::NewLine+$release.body),'RMP update','YesNo','Information') -ne 'Yes'){return}
 $temp=Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 $null=[IO.Directory]::CreateDirectory($temp)
+$setup=Join-Path $temp 'RMP-Setup-x64.exe'
+$form=New-Object Windows.Forms.Form
+$form.Text='Updating RMP';$form.ClientSize=New-Object Drawing.Size(440,130);$form.FormBorderStyle='FixedDialog';$form.MaximizeBox=$false;$form.MinimizeBox=$false;$form.StartPosition='CenterScreen'
+$label=New-Object Windows.Forms.Label;$label.Location=New-Object Drawing.Point(16,14);$label.Size=New-Object Drawing.Size(400,20);$label.Text="Downloading RMP $best..."
+$bar=New-Object Windows.Forms.ProgressBar;$bar.Location=New-Object Drawing.Point(16,44);$bar.Size=New-Object Drawing.Size(400,22);$bar.Minimum=0;$bar.Maximum=100
+$cancel=New-Object Windows.Forms.Button;$cancel.Text='Cancel';$cancel.Location=New-Object Drawing.Point(16,84);$cancel.Size=New-Object Drawing.Size(100,30)
+$restart=New-Object Windows.Forms.Button;$restart.Text='Restart Now';$restart.Location=New-Object Drawing.Point(324,84);$restart.Size=New-Object Drawing.Size(100,30);$restart.Visible=$false
+$form.Controls.Add($label);$form.Controls.Add($bar);$form.Controls.Add($cancel);$form.Controls.Add($restart)
+$state=@{phase='download';error=$null;cancelled=$false;restart=$false;count=5}
+$cancel.Add_Click({$state.cancelled=$true;if($state.phase -eq 'download'){$client.CancelAsync()}})
+$restart.Add_Click({$state.restart=$true})
+$client.add_DownloadProgressChanged({param($sender,$e)$bar.Value=[Math]::Min(100,[int]$e.ProgressPercentage);$label.Text="Downloading RMP $best... "+$e.ProgressPercentage+"%"})
+$client.add_DownloadFileCompleted({param($sender,$e)if($e.Cancelled){$state.cancelled=$true}elseif($e.Error){$state.error=$e.Error.Message}else{$state.phase='ready'}})
+$timer=New-Object Windows.Forms.Timer;$timer.Interval=1000
+$timer.Add_Tick({
+ if($state.restart){$state.count=0}else{$state.count--}
+ if($state.count -le 0){$timer.Stop();$state.phase='install'}
+ else{$label.Text="RMP $best is ready. Restarting in "+$state.count+" seconds to finish the update."}
+})
 try {
- $setup=Join-Path $temp 'RMP-Setup-x64.exe'
- $client.DownloadFile($asset.browser_download_url,$setup)
+ $form.Show()
+ $client.DownloadFileAsync($asset.browser_download_url,$setup)
+ while($state.phase -eq 'download' -and -not $state.cancelled -and -not $state.error){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 30}
+ if($state.error){throw $state.error}
+ if($state.cancelled){return}
  $sha=[Security.Cryptography.SHA256]::Create();$stream=[IO.File]::OpenRead($setup)
  try {$digest='sha256:'+([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant()}finally{$stream.Dispose();$sha.Dispose()}
  if($digest -cne $asset.digest){throw 'The download did not match the release checksum.'}
+ $bar.Value=100;$restart.Visible=$true;$label.Text="RMP $best is ready. Restarting in 5 seconds to finish the update."
+ $timer.Start()
+ while($state.phase -eq 'ready' -and -not $state.cancelled){[Windows.Forms.Application]::DoEvents();Start-Sleep -Milliseconds 30}
+ if($state.cancelled -or $state.phase -ne 'install'){return}
  $dir=[IO.Path]::GetDirectoryName($PlayerPath)
  if(!$player.HasExited){
   if(!$player.CloseMainWindow() -or !$player.WaitForExit(15000)){throw 'Close RMP and try again.'}
  }
+ $form.Close()
  $p=Start-Process $setup -ArgumentList ("/S /D="+$dir) -PassThru -Wait
  if($p.ExitCode -ne 0){throw 'The installer could not update this folder.'}
  Start-Process $PlayerPath
-} catch {Notice $_.Exception.Message} finally {if(Test-Path $setup){[IO.File]::Delete($setup)};[IO.Directory]::Delete($temp)}
+} catch {if($form.Visible){$form.Close()};Notice $_.Exception.Message} finally {$timer.Dispose();$form.Dispose();if(Test-Path $setup){[IO.File]::Delete($setup)};[IO.Directory]::Delete($temp,$true)}

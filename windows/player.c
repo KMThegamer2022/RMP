@@ -5,6 +5,8 @@
 #include <commctrl.h>
 #include <shellapi.h>
 #include <shobjidl.h>
+#include <shlobj.h>
+#include <math.h>
 #include <propvarutil.h>
 #include <initguid.h>
 #include <propkey.h>
@@ -26,6 +28,12 @@ extern const char *ap_item(Player *,size_t);
 extern int ap_state(Player *);
 extern int64_t ap_time(Player *),ap_length(Player *);
 extern void ap_tracks(Player *,bool,void *,void(*)(void *,int,const char *,bool));
+extern char *ap_menu_options(Player *,const char *);
+extern char *ap_menu_action(Player *,const char *,const char *);
+extern size_t ap_library_count(Player *);
+extern const char *ap_library_item(Player *,size_t);
+static HMENU submenu(HMENU,const wchar_t *);
+static void enqueue(const wchar_t *,bool);
 
 enum {OPEN=101,PLAY,PREV,NEXT,FULL,STREAM,SEEK,VOLUME,STOP,LIST,REPEAT,SHUFFLE};
 static HWND mainwin,video,play,position,level,clocktext;
@@ -62,6 +70,10 @@ static void start(size_t),showCurrentTrack(void),layout(HWND,int,int);
 #include "media-library.h"
 #include "transport-labels.h"
 #include "terminal.h"
+#include "menu-view.h"
+#include "player-menus.h"
+#include "menu-files.h"
+#include "menu-commands.h"
 /* Older Windows versions route wheel input to the focus owner. Follow the
    pointer over the volume control even when a child such as the queue has focus. */
 static bool routeWheel(HWND target,WPARAM direction,LPARAM location){
@@ -243,10 +255,7 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  switch(msg){
 
  case WM_CREATE:{
- mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);bar=CreateMenu();HMENU file=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)file,L"File");AppendMenuW(file,MF_STRING,OPEN,L"Open file…");AppendMenuW(file,MF_STRING,STREAM,L"Open network stream…");
- AppendMenuW(file,MF_SEPARATOR,0,NULL);AppendMenuW(file,MF_STRING,490,L"Check for Updates…");
- HMENU view=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)view,L"&View");AppendMenuW(view,MF_STRING,FULL,L"Full screen\tF11");AppendMenuW(view,MF_STRING,SHOW_TERMINAL,L"RMP Terminal");
- queue=submenu(bar,L"Queue");audio=submenu(bar,L"Audio track");subs=submenu(bar,L"Subtitles");themeMenu=CreatePopupMenu();AppendMenuW(bar,MF_POPUP,(UINT_PTR)themeMenu,L"&Theme");AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+VLC_THEME,names[VLC_THEME]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+RMP_DEFAULT,names[RMP_DEFAULT]);for(int i=0;i<RMP_DEFAULT;i++)AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+i,names[i]);AppendMenuW(themeMenu,MF_STRING,THEME_FIRST+LINUX_THEME,names[LINUX_THEME]);SetMenu(w,bar);
+ mainwin=w;uiFont=CreateFontW(-scale(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");updateGlass(w);createPlayerMenus(w);
  video=control(w,L"STATIC",L"",0,SS_BLACKRECT|SS_NOTIFY|WS_CLIPCHILDREN);SetWindowSubclass(video,videoProc,1,0);player=ap_create(video);if(!player)return -1;
  idleLogo=control(video,L"STATIC",L"",0,SS_ICON|SS_CENTERIMAGE|WS_DISABLED);
  brandIcon=LoadImageW(GetModuleHandleW(NULL),MAKEINTRESOURCEW(1),IMAGE_ICON,scale(96),scale(96),0);
@@ -329,10 +338,13 @@ static LRESULT CALLBACK windowproc(HWND w,UINT msg,WPARAM wp,LPARAM lp){
  if(skin==SEVEN)break;
  if((HWND)lp!=video && (HWND)lp!=idleLogo && panelBrush && !contrastMode){
  SetBkColor((HDC)wp,color(themes[skin].panel));SetTextColor((HDC)wp,color(themes[skin].text));return (LRESULT)panelBrush;}break;
- case WM_INITMENUPOPUP:{HMENU m=(HMENU)wp;if(m!=queue&&m!=audio&&m!=subs)break;while(GetMenuItemCount(m)>0)DeleteMenu(m,0,MF_BYPOSITION);
- if(m==queue){for(size_t i=0;i<ap_count(player);i++)track(m,(int)i,basename8(ap_item(player,i)),i==(size_t)ap_index(player));}else ap_tracks(player,m==subs,m,track);return 0;}
- case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else ap_select(player,m==subs,(int)item.dwItemData);return 0;}
+ case WM_INITMENUPOPUP:{HMENU m=(HMENU)wp;
+ if(m==queue){while(GetMenuItemCount(m)>0)DeleteMenu(m,0,MF_BYPOSITION);for(size_t i=0;i<ap_count(player);i++)track(m,(int)i,basename8(ap_item(player,i)),i==(size_t)ap_index(player));return 0;}
+ if(fillPlayerMenu(m))return 0;
+ break;}
+ case WM_MENUCOMMAND:{HMENU m=(HMENU)lp;MENUITEMINFOW item={sizeof(item)};item.fMask=MIIM_DATA;GetMenuItemInfoW(m,wp,TRUE,&item);if(m==queue)start(item.dwItemData);else selectMenuOption(m,(UINT)wp);return 0;}
  case WM_COMMAND:
+ if(menuCommand(w,LOWORD(wp)))return 0;
  switch(LOWORD(wp)){
  case NAV_NOW:case NAV_LIBRARY:case NAV_QUEUE:showMediaPage(LOWORD(wp));return 0;
  case FILTER:if(HIWORD(wp)==EN_CHANGE)rebuildMediaRows();return 0;
@@ -367,5 +379,5 @@ int WINAPI wWinMain(HINSTANCE h,HINSTANCE prev,LPWSTR cmd,int show){
  int argc;wchar_t **argv=CommandLineToArgvW(GetCommandLineW(),&argc);smoke=argc==3 && wcscmp(argv[1],L"--smoke-test")==0;deadline=GetTickCount64()+20000;for(int i=smoke?2:1;i<argc;i++)enqueue(argv[i],wcsstr(argv[i],L"://")!=NULL);LocalFree(argv);if(argc>1)start(0);
  ShowWindow(w,show);if(!smoke)launchCheck(false);MSG m;while(GetMessageW(&m,NULL,0,0)>0){
  if(m.message==WM_MOUSEWHEEL && routeWheel(m.hwnd,m.wParam,m.lParam))continue;
- if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
+ if(m.message==WM_KEYDOWN && (m.wParam==VK_F11 || (m.wParam==VK_ESCAPE && fullscreen))){togglefull();continue;}if(menuKeys && TranslateAcceleratorW(mainwin,menuKeys,&m))continue;TranslateMessage(&m);DispatchMessageW(&m);}BufferedPaintUnInit();return (int)m.wParam;
 }
