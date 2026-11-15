@@ -48,6 +48,9 @@ jobs:
       - name: Switch all themes and verify preference restoration
         shell: pwsh
         run: ./windows/test-themes.ps1 ./build/RMP/RMP.exe (Resolve-Path packaging/fixtures/open-video.mp4)
+      - name: Exercise the simulated Linux terminal and playback window
+        shell: pwsh
+        run: ./windows/test-terminal.ps1 ./build/RMP/RMP.exe (Resolve-Path packaging/fixtures/open-video.mp4)
       - name: Exercise manual update command against GitHub
         shell: pwsh
         run: ./windows/test-update.ps1 ./build/RMP/RMP.exe
@@ -56,6 +59,8 @@ jobs:
         run: |
           curl.exe -fLsS --retry 2 https://github.com/KMThegamer2022/RMP/releases/download/v2.6.3/RMP-Windows-x64.zip -o file-open-baseline.zip
           7z x -ofile-open-baseline file-open-baseline.zip
+          # The historical build now prompts to upgrade. Keep that dialog out of the timed file picker.
+          Remove-Item file-open-baseline/RMP/update.ps1
           foreach ($app in @('file-open-baseline/RMP/RMP.exe','build/RMP/RMP.exe')) {
             ./windows/test-file-open.ps1 $app packaging/fixtures/open-video.mp4
           }
