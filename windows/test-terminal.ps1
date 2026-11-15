@@ -39,6 +39,7 @@ function Wait-Until([scriptblock]$test,[string]$reason){
 }
 $settings='HKCU:\Software\RMP'
 $previous=Get-ItemPropertyValue $settings Theme -ErrorAction SilentlyContinue
+$previousBack=Get-ItemPropertyValue $settings PreviousTheme -ErrorAction SilentlyContinue
 $fixturePath=(Resolve-Path $Fixture).Path
 $p=$null
 try {
@@ -87,15 +88,28 @@ try {
  Wait-Until {[TerminalTest]::IsWindowVisible($term)} 'View menu did not reopen terminal'
  [TerminalTest]::Command($edit,'clear')
  if([TerminalTest]::Text($output)){throw 'Clear did not empty transcript'}
- [TerminalTest]::Menu($w,315)
+ [TerminalTest]::Command($edit,'theme')
+ $listing=[TerminalTest]::Text($output)
+ foreach($name in @('VLC','RMP Default','Windows 10/11','Windows 7','Windows XP','Mac','Linux')){
+  if(!$listing.Contains($name)){throw "Terminal theme listing omitted $name"}
+ }
+ [TerminalTest]::Command($edit,'theme vlc')
+ if((Get-ItemPropertyValue $settings Theme) -ne 5){throw 'Direct terminal theme switch was not saved'}
  if([TerminalTest]::IsWindowVisible($term) -or ![TerminalTest]::IsWindowVisible($seek)){throw 'VLC theme did not restore its controls'}
+ [TerminalTest]::Menu($w,312)
  [TerminalTest]::Menu($w,316)
  [void][TerminalTest]::Send($w,16,[IntPtr]::Zero,[IntPtr]::Zero)
  if(!$p.WaitForExit(5000)){throw 'Closing the video window did not quit both windows'}
  $p=Start-Process $Player -PassThru
  Wait-Until {[TerminalTest]::IsWindowVisible([TerminalTest]::Window('RMPTerminal',$p.Id))} 'Saved Linux theme did not reopen the terminal'
+ $term=[TerminalTest]::Window('RMPTerminal',$p.Id)
+ $w=[TerminalTest]::Window('RMPPlayer',$p.Id)
+ $edit=[TerminalTest]::GetDlgItem($term,623)
+ [TerminalTest]::Command($edit,'theme back')
+ if((Get-ItemPropertyValue $settings Theme) -ne 2 -or [TerminalTest]::IsWindowVisible($term) -or ![TerminalTest]::IsWindowVisible([TerminalTest]::GetDlgItem($w,516))){throw 'After restart theme back did not restore XP and its real queue'}
  Write-Host 'Verified Linux terminal, command completion and history, isolated input, real video playback, fullscreen and window restoration.'
 }finally{
  if($p -and !$p.HasExited){$w=[TerminalTest]::Window('RMPPlayer',$p.Id);[void][TerminalTest]::Send($w,16,[IntPtr]::Zero,[IntPtr]::Zero);if(!$p.WaitForExit(5000)){$p.Kill()}}
+ if($null -eq $previousBack){Remove-ItemProperty $settings PreviousTheme -ErrorAction SilentlyContinue}else{Set-ItemProperty $settings PreviousTheme $previousBack}
  if($null -eq $previous){Remove-ItemProperty $settings Theme -ErrorAction SilentlyContinue}else{Set-ItemProperty $settings Theme $previous}
 }
