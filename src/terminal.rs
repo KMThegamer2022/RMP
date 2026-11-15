@@ -79,16 +79,37 @@ impl Terminal {
         if !dir.is_dir() {
             return Err(format!("{} is not a folder.", path.display()));
         }
+        // GetFullPathName and LibVLC expect ordinary drive paths. Rust's
+        // canonicalize returns a verbatim path even for a short local name.
+        #[cfg(windows)]
+        let dir = {
+            let raw = dir
+                .to_str()
+                .ok_or_else(|| "Unsupported folder name.".to_string())?;
+            let drive = raw.strip_prefix(r"\\?\").unwrap_or(raw);
+            if drive.as_bytes().get(1) != Some(&b':') {
+                return Err("Use a local drive folder.".into());
+            }
+            PathBuf::from(drive)
+        };
         self.cwd = dir;
         Ok(String::new())
     }
 
     fn display_path(&self) -> String {
-        // canonicalize on Windows returns the extended-length drive path.
-        let path = self.cwd.to_string_lossy();
-        #[cfg(windows)]
-        let path = path.strip_prefix(r"\\?\").unwrap_or(&path);
-        path.to_string()
+        self.cwd.display().to_string()
+    }
+
+    fn prompt(&self) -> String {
+        let location = match self.cwd.strip_prefix(&self.home) {
+            Ok(relative) if relative.as_os_str().is_empty() => "~".into(),
+            Ok(relative) => format!(
+                "~/{}",
+                relative.to_string_lossy().replace(MAIN_SEPARATOR, "/")
+            ),
+            Err(_) => self.display_path().replace(MAIN_SEPARATOR, "/"),
+        };
+        format!("rmp:{location}$")
     }
 
     fn complete(&self, input: &str) -> String {
@@ -356,7 +377,7 @@ pub unsafe extern "C" fn ap_terminal_complete(p: &Player, line: *const c_char) -
 }
 #[no_mangle]
 pub extern "C" fn ap_terminal_prompt(p: &Player) -> *mut c_char {
-    owned(format!("{} >", p.terminal.display_path()))
+    owned(p.terminal.prompt())
 }
 #[no_mangle]
 pub extern "C" fn ap_terminal_volume(p: &Player) -> i32 {
@@ -415,7 +436,9 @@ mod tests {
             f.term.complete("cd 音"),
             format!("cd 音 楽{MAIN_SEPARATOR}")
         );
+        assert_eq!(f.term.prompt(), "rmp:~$");
         f.term.cd("音 楽").unwrap();
+        assert_eq!(f.term.prompt(), "rmp:~/音 楽$");
         assert_eq!(f.term.list("").unwrap(), "café hits.mid\ncafé live.mid");
         assert_eq!(f.term.complete("play caf"), "play café ");
         assert_eq!(f.term.complete("play \"café hi"), "play \"café hits.mid\"");
