@@ -9,6 +9,7 @@ $client.Headers['Accept']='application/vnd.github+json'
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]3072
 $repo='https://github.com/KMThegamer2022/RMP/releases/download/'
 try {
+ Add-Type -AssemblyName System.Web.Extensions
  # The update manifest is read from the repository, not the GitHub API, so checks are not rate limited.
  $manifest=(New-Object Web.Script.Serialization.JavaScriptSerializer).DeserializeObject($client.DownloadString('https://raw.githubusercontent.com/KMThegamer2022/RMP/main/updates/latest.json'))
  $best=[Version]$CurrentVersion

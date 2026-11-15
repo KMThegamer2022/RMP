@@ -1,0 +1,13 @@
+{
+  "version": "3.2.1",
+  "tag": "v3.2.1",
+  "notes": "RMP 3.2.1 adds YouTube links, a desktop shortcut option, and a seek bar fix on Windows.",
+  "windows": {
+    "name": "RMP-Setup-x64.exe",
+    "sha256": "cb3b88db875de3d7ab00884b0358273f20fed26ca9c28417fea7c2ab92682453"
+  },
+  "macos": {
+    "name": "RMP-3.2.1-macOS-arm64.zip",
+    "sha256": "7c7f81fa4494dce03af2efb4733f7603a51156cff6b99a76dbe19f98c841013c"
+  }
+}
