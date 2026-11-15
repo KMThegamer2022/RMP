@@ -60,3 +60,59 @@ Windows app are unchanged.
   equivalent, and `windows/` needs its own parity list.
 - **Updates, packaging, signing**: `updates/*`, `build.sh`, and the `.app` bundle layout.
 - A parity checklist and switch-over decision come later, with the user.
+
+## Round 2: default theme, main window only
+
+Target: the shipping app's default theme (`VLC_THEME` in `themes.h`, the "VLC" skin that a fresh
+launch uses). Window 900×570 content, min 720×380. Screenshots are in `screenshots/`:
+`shipping-default-theme.png`, `egui-spike-default-theme.png`, and `side-by-side.png`. Both were taken
+on the same fixture at the same window size.
+
+### Matches
+- Colours from `themes.h` (panel `f2f2f2`, edge `b4b4b4`, face `f8f8f8`, text `535353`, accent `57bb39`,
+  wedge `e2e2e2` / `4bc23b` / `777777`), light appearance.
+- Layout from `ui.m`/`arrangeChrome`: black screen filling the top, timeline row (16 pt inset, 6 pt
+  above the transport row), transport row 12 pt from the bottom, 8 pt spacing, "Volume" label and
+  85 pt wedge slider at the right edge. The top "RMP" row is hidden in this theme, as in the shipping app.
+- Video is letterboxed by libvlc inside the black screen, as in the shipping app.
+- Transport buttons: rounded 2 pt, 1 pt edge, icons drawn as shapes (play, pause, prev, next, stop,
+  fullscreen); Queue, ↻ and ⤨ are text.
+- Clock: monospaced 12 pt `m:ss / m:ss`, or `h:mm:ss` past an hour.
+- Window title follows the open file (`RMP — open-video.mp4`).
+
+### Architecture change that made video and controls coexist
+The engine's video view is a child `NSView` created by the spike and added inside eframe's content
+view. It is positioned over the black screen rect every frame. Before this, libvlc was given the whole
+content view, so the video covered the controls.
+Hiding that child when nothing is loaded shows the cone (egui draws the cone PNG from `assets/`).
+
+### Verified by running
+- Window opens at 900×570 and plays `open-video.mp4`.
+- Play/Pause click (CoreGraphics mouse events): icon switches Play/Pause, and the time freezes when paused.
+- Seek click on the timeline: knob and clock jump to the clicked point (≈0:14 of 0:30) and stay paused.
+- Volume click on the wedge: fill changes to the clicked level.
+- The screenshots above.
+
+### Not verified
+- Stop, Previous, Next, Fullscreen, Queue, repeat and shuffle clicks. They are coded, not exercised.
+- Space and Cmd+O shortcuts.
+- Drag gestures on the seek bar and the wedge.
+- Audio output (the libvlc message "No active audio output" still appears in logs).
+- Queue and repeat/shuffle do nothing yet (spike has one-item queues).
+
+### What still differs from the shipping app
+- Title bar text is faint in the spike. The window's appearance was set to Aqua, but the title colour
+  still reads light. The shipping title is black.
+- Seek bar knob is a little smaller; the fill and rail colours are close but not exact.
+- Icon weights and sizes for Previous/Next/Stop and the fullscreen corners are hand-drawn, not the
+  system glyphs. The shipping app uses the glyphs.
+- Paused state: the shipping app keeps the frozen frame and overlays the RMP cone. The spike shows
+  the frozen frame with no overlay, since egui cannot draw above the video view.
+- Idle state (no file): the shipping app shows the cone on black. The spike has the same code path, but
+  this was not captured side by side.
+- Button widths and gaps are within a few points of the shipping app but not measured exactly.
+- The window is a plain egui window, not a full-size content view. Traffic lights and the bottom
+  edge match, but the title bar is still a system title bar.
+- Top row (name, status, Open) is absent in this theme, as in the shipping app. The spike opens files
+  with Cmd+O or the Open dialog from there; it has no menu bar.
+- Status line text is not shown; the shipping default theme does not show it either.
