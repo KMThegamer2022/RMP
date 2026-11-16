@@ -8,6 +8,8 @@ fn main() {
         let dir = std::env::var("VLC_DIR").unwrap_or_else(|_| "vlc-3.0.24".into());
         println!("cargo:rustc-link-search=native={dir}/sdk/lib");
         println!("cargo:rustc-link-lib=dylib=libvlc");
+        // The engine calls vsnprintf, which the MSVC runtime only exports through this library.
+        println!("cargo:rustc-link-lib=legacy_stdio_definitions");
         return;
     }
     let app = std::env::var("VLC_APP").unwrap_or_else(|_| "/Applications/VLC.app".into());
