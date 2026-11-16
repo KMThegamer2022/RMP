@@ -23,7 +23,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_LBUTTON};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, GetFocus, SetFocus, VK_LBUTTON};
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -67,7 +67,12 @@ pub fn input_stats() -> String {
         r.bottom,
         video != 0 && unsafe { IsWindowVisible(hwnd(video)) } != 0,
         p.x,
-        p.y
+        p.y,
+        {
+            let f = unsafe { GetFocus() } as isize;
+            if f == 0 { "none".to_string() } else if f == video { "video".to_string() } else if unsafe { GetParent(hwnd(video)) } as isize == f { "main".to_string() } else { format!("other-{f:x}") }
+        },
+        app_active()
     )
 }
 
@@ -103,6 +108,13 @@ pub fn take_video_double_click() -> bool {
         };
         if inside {
             INSIDE.fetch_add(1, Ordering::Relaxed);
+            // Whatever window under the pointer took the click, the main window gets the keyboard.
+            unsafe {
+                let parent = GetParent(hwnd(video));
+                if !parent.is_null() {
+                    SetFocus(parent);
+                }
+            }
             let window = std::time::Duration::from_millis(unsafe { GetDoubleClickTime() } as u64);
             let near = (p.x - st.last_pos.0).abs() <= 8 && (p.y - st.last_pos.1).abs() <= 8;
             if st.last_press.is_some_and(|t| now.duration_since(t) <= window) && near {
@@ -125,6 +137,22 @@ pub fn take_video_double_click() -> bool {
 }
 
 unsafe extern "system" fn video_proc(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let parent = GetParent(w);
+    match msg {
+        // The video window must never keep the keyboard: pass keys up to the main window and give it
+        // the focus back after any click.
+        WM_KEYDOWN | WM_KEYUP | WM_SYSKEYDOWN | WM_SYSKEYUP | WM_CHAR => {
+            if !parent.is_null() {
+                return SendMessageW(parent, msg, wp, lp);
+            }
+        }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+            if !parent.is_null() {
+                SetFocus(parent);
+            }
+        }
+        _ => {}
+    }
     if msg == WM_LBUTTONDBLCLK {
         MESSAGES.fetch_add(1, Ordering::Relaxed);
         DOUBLE_CLICKED.store(true, Ordering::Relaxed);

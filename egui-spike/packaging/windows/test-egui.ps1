@@ -77,12 +77,14 @@ try { Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen' } c
 [void][In]::SetForegroundWindow($window)
 [In]::Key(0x1B)
 Wait-Label $log 'c'
-Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen'
+Write-Host ((Select-String -Path $log -Pattern '^c ' | Select-Object -First 1).Line -replace '^.*input=','input=')
+try { Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Space pauses.
 [void][In]::SetForegroundWindow($window)
 [In]::Key(0x20)
 Wait-Label $log 'd'
-Expect (Field $log 'd' 'state') '4' 'Space pauses'
+Write-Host ((Select-String -Path $log -Pattern '^d ' | Select-Object -First 1).Line -replace '^.*input=','input=')
+try { Expect (Field $log 'd' 'state') '4' 'Space pauses' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 if ($soft) { $script:softFailures = $soft }
 if (!$p.WaitForExit(20000)) { $p.Kill(); throw 'RMP did not quit from the script' }
 Copy-Item $log (Join-Path $OutDir 'state-final.log')
