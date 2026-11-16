@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_injected={} subclass={}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} main={:x} focus={} foreground_ours={} keys_seen={} keys_injected={} subclass={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -68,6 +68,7 @@ pub fn input_stats() -> String {
         video != 0 && unsafe { IsWindowVisible(hwnd(video)) } != 0,
         p.x,
         p.y,
+        if video != 0 { unsafe { GetParent(hwnd(video)) as isize } } else { 0 },
         {
             let f = unsafe { GetFocus() } as isize;
             if f == 0 { "none".to_string() } else if f != video && unsafe { GetParent(hwnd(video)) } as isize != f { let mut name = [0u16; 64]; let n = unsafe { GetClassNameW(hwnd(f), name.as_mut_ptr(), 64) }; format!("other-{}", String::from_utf16_lossy(&name[..n.max(0) as usize])) } else if f == video { "video".to_string() } else if unsafe { GetParent(hwnd(video)) } as isize == f { "main".to_string() } else { format!("other-{f:x}") }

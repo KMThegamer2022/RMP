@@ -81,6 +81,7 @@ $line = (Select-String -Path $log -Pattern '^a ' | Select-Object -First 1).Line
 if ($line -notmatch 'rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)') { throw 'No video rectangle in the state dump' }
 $cx = [int](([int]$Matches[1] + [int]$Matches[3]) / 2); $cy = [int](([int]$Matches[2] + [int]$Matches[4]) / 2)
 Write-Host "Double-clicking the video at $cx,$cy"
+if ($line -match 'main=([0-9a-f]+)') { $mainWindow = [IntPtr][Convert]::ToInt64($Matches[1], 16); Write-Host "App window handle $($Matches[1]); Process.MainWindowHandle is $($window.ToInt64().ToString('x'))" } else { $mainWindow = $window }
 [In]::Click($cx, $cy, 2)
 Wait-Label $log 'b'
 Write-Host ((Select-String -Path $log -Pattern '^b ' | Select-Object -First 1).Line -replace '^.*input=','input=')
@@ -88,13 +89,13 @@ $soft = @()
 try { Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Escape leaves fullscreen.
 [void][In]::SetForegroundWindow($window)
-[In]::KeyMessage($window, 0x1B)
+[In]::KeyMessage($mainWindow, 0x1B)
 Wait-Label $log 'c'
 Write-Host ((Select-String -Path $log -Pattern '^c ' | Select-Object -First 1).Line -replace '^.*input=','input=')
 try { Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Space pauses.
 [void][In]::SetForegroundWindow($window)
-[In]::KeyMessage($window, 0x20)
+[In]::KeyMessage($mainWindow, 0x20)
 Wait-Label $log 'd'
 Write-Host ((Select-String -Path $log -Pattern '^d ' | Select-Object -First 1).Line -replace '^.*input=','input=')
 try { Expect (Field $log 'd' 'state') '4' 'Space pauses' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
