@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_queued={} keys_injected={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -72,7 +72,10 @@ pub fn input_stats() -> String {
             let f = unsafe { GetFocus() } as isize;
             if f == 0 { "none".to_string() } else if f != video && unsafe { GetParent(hwnd(video)) } as isize != f { let mut name = [0u16; 64]; let n = unsafe { GetClassNameW(hwnd(f), name.as_mut_ptr(), 64) }; format!("other-{}", String::from_utf16_lossy(&name[..n.max(0) as usize])) } else if f == video { "video".to_string() } else if unsafe { GetParent(hwnd(video)) } as isize == f { "main".to_string() } else { format!("other-{f:x}") }
         },
-        app_active()
+        app_active(),
+        KEYS_SEEN.load(Ordering::Relaxed),
+        KEYS_QUEUED.load(Ordering::Relaxed),
+        KEYS_INJECTED.load(Ordering::Relaxed)
     )
 }
 
@@ -601,6 +604,9 @@ pub fn registry_dword(name: &str) -> Option<u32> {
 // is in front but its main window does not hold the focus, the keys are handed to egui instead.
 
 static KEYS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::new(Vec::new());
+static KEYS_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static KEYS_QUEUED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static KEYS_INJECTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
@@ -608,11 +614,13 @@ unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
         let down = wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN;
         let up = wp as u32 == WM_KEYUP || wp as u32 == WM_SYSKEYUP;
         let main = VIDEO_WINDOW.load(Ordering::Relaxed);
+        KEYS_SEEN.fetch_add(1, Ordering::Relaxed);
         if (down || up) && main != 0 && app_active() {
             let parent = GetParent(hwnd(main));
             if GetFocus() != parent {
                 if let Ok(mut q) = KEYS.lock() {
                     if q.len() < 64 {
+                        KEYS_QUEUED.fetch_add(1, Ordering::Relaxed);
                         q.push((info.vkCode, down));
                     }
                 }
@@ -656,6 +664,7 @@ pub fn inject_keys(raw: &mut egui::RawInput) {
     let (ctrl, shift, alt) = (held(0x11), held(0x10), held(0x12));
     for (vk, pressed) in keys {
         if let Some(key) = egui_key(vk) {
+            KEYS_INJECTED.fetch_add(1, Ordering::Relaxed);
             raw.events.push(egui::Event::Key {
                 key,
                 physical_key: None,
