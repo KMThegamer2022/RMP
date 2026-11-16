@@ -7,4 +7,5 @@ fn main() {
     println!("cargo:rustc-link-search=native={lib}");
     println!("cargo:rustc-link-lib=dylib=vlc");
     println!("cargo:rustc-link-arg=-Wl,-rpath,{lib}");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/lib");
 }

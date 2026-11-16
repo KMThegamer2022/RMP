@@ -255,3 +255,6 @@ queue, update check, About). Checked by running it, with the state dump from the
   dialog, native file dialogs, the wallpaper window visually, the update install (a non-bundle cannot replace itself).
 - Differences that remain: menu bar is in-window (egui) rather than the native one; font rendering
   differs slightly; shipping app has no shortcut customisation, so none here.
+
+### Installer (round 12)
+`packaging/build-app.sh` builds a signed (ad-hoc) RMP.app with VLC bundled, then an installer dmg using the shipping `packaging/mac-setup.sh`. Output: `build/RMP-egui.dmg`. Verified: dmg mounts, bundle signature valid, bundled app plays with no VLC_PLUGIN_PATH set. Not verified: running the Setup app, a second Mac, Gatekeeper (ad-hoc signed, not notarised). Preferences live in "RMP egui spike", separate from the shipping app.

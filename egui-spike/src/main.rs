@@ -717,6 +717,10 @@ fn install_fonts(ctx: &egui::Context) {
 fn main() -> eframe::Result {
     // ui.m main(): VLC_PLUGIN_PATH points at the bundle's plugins. The spike runs from target/, so it
     // uses the plugins inside VLC.app unless the caller set the variable.
+    let bundled = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).filter(|d| d.is_dir());
+    if let (None, Some(dir)) = (std::env::var_os("VLC_PLUGIN_PATH"), bundled) {
+        std::env::set_var("VLC_PLUGIN_PATH", dir);
+    }
     if std::env::var_os("VLC_PLUGIN_PATH").is_none() {
         let app = std::env::var("VLC_APP").unwrap_or_else(|_| "/Applications/VLC.app".into());
         std::env::set_var("VLC_PLUGIN_PATH", format!("{app}/Contents/MacOS/plugins"));
