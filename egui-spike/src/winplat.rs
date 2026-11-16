@@ -24,7 +24,7 @@ use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, GetFocus, SetFocus, VK_LBUTTON};
-use windows_sys::Win32::UI::Shell::{DragQueryFileW, ShellExecuteW};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, DragQueryFileW, SetWindowSubclass, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 fn wide(s: &str) -> Vec<u16> {
@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_queued={} keys_injected={} hook={}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_injected={} subclass={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -74,7 +74,6 @@ pub fn input_stats() -> String {
         },
         app_active(),
         KEYS_SEEN.load(Ordering::Relaxed),
-        KEYS_QUEUED.load(Ordering::Relaxed),
         KEYS_INJECTED.load(Ordering::Relaxed),
         HOOK_STATUS.load(Ordering::Relaxed)
     )
@@ -212,7 +211,7 @@ impl Surfaces {
                 return None;
             }
             VIDEO_WINDOW.store(video as isize, Ordering::Relaxed);
-            install_key_hook();
+            install_key_hook(hwnd(parent));
             Some(Surfaces { parent, video: video as isize, last: Cell::new(None) })
         }
     }
@@ -600,44 +599,38 @@ pub fn registry_dword(name: &str) -> Option<u32> {
 }
 
 // ---- Keyboard fallback ------------------------------------------------------------------------
-// Windows moves keyboard focus onto libvlc's output window (and other child windows) after clicks and
-// fullscreen switches, and those never pass keys on. A low-level hook sees every key; while this app
-// is in front but its main window does not hold the focus, the keys are handed to egui instead.
+// Windows can leave the keyboard focus on a window winit does not read (libvlc's output window, or
+// winit's own helper window after a fullscreen switch), and then no key reaches egui. The main
+// window is subclassed so every key message is seen; `inject_keys` hands them to egui, dropping the
+// copy winit delivers when it was focused after all.
 
 static KEYS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::new(Vec::new());
 static KEYS_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-static KEYS_QUEUED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static KEYS_INJECTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static HOOK_STATUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
 
-unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 {
-        let info = &*(lp as *const KBDLLHOOKSTRUCT);
-        let down = wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN;
-        let up = wp as u32 == WM_KEYUP || wp as u32 == WM_SYSKEYUP;
-        let main = VIDEO_WINDOW.load(Ordering::Relaxed);
+unsafe extern "system" fn key_subclass(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _data: usize) -> LRESULT {
+    let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
+    let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+    if down || up {
         KEYS_SEEN.fetch_add(1, Ordering::Relaxed);
-        if (down || up) && main != 0 && app_active() {
-            let parent = GetParent(hwnd(main));
-            if GetFocus() != parent {
-                if let Ok(mut q) = KEYS.lock() {
-                    if q.len() < 64 {
-                        KEYS_QUEUED.fetch_add(1, Ordering::Relaxed);
-                        q.push((info.vkCode, down));
-                    }
+        // Auto-repeat (bit 30 set on a key-down) is not a new press.
+        let repeat = down && (lp as u32 >> 30) & 1 == 1;
+        if !repeat {
+            if let Ok(mut q) = KEYS.lock() {
+                if q.len() < 64 {
+                    q.push((wp as u32, down));
                 }
             }
         }
     }
-    CallNextHookEx(std::ptr::null_mut(), code, wp, lp)
+    DefSubclassProc(w, msg, wp, lp)
 }
 
-static HOOK_STATUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
-
-fn install_key_hook() {
+fn install_key_hook(parent: HWND) {
     unsafe {
-        let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), GetModuleHandleW(std::ptr::null()), 0);
-        // 0 means it failed; otherwise the handle's low bits are kept for the test log.
-        HOOK_STATUS.store(if hook.is_null() { -(windows_sys::Win32::Foundation::GetLastError() as isize) - 1000 } else { 1 }, Ordering::Relaxed);
+        let ok = SetWindowSubclass(parent, Some(key_subclass), 1, 0);
+        HOOK_STATUS.store(ok as isize, Ordering::Relaxed);
     }
 }
 
@@ -662,21 +655,54 @@ fn egui_key(vk: u32) -> Option<egui::Key> {
     })
 }
 
-/// Called from `raw_input_hook`: turns keys seen while the main window lacked focus into egui events.
+struct Recent {
+    winit: Vec<(egui::Key, bool, std::time::Instant)>,
+    ours: Vec<(egui::Key, bool, std::time::Instant)>,
+}
+static RECENT: std::sync::Mutex<Recent> = std::sync::Mutex::new(Recent { winit: Vec::new(), ours: Vec::new() });
+
+/// Called from `raw_input_hook`. Adds key events winit did not deliver, and removes winit's copy of a
+/// key this module already delivered, so each press reaches egui once.
 pub fn inject_keys(raw: &mut egui::RawInput) {
+    let window = std::time::Duration::from_millis(200);
+    let now = std::time::Instant::now();
+    let Ok(mut recent) = RECENT.lock() else { return };
+    recent.winit.retain(|e| now.duration_since(e.2) < window);
+    recent.ours.retain(|e| now.duration_since(e.2) < window);
+    // winit's own events: drop ones we already injected, remember the rest.
+    let mut kept = Vec::with_capacity(raw.events.len());
+    for event in raw.events.drain(..) {
+        if let egui::Event::Key { key, pressed, repeat: false, .. } = &event {
+            if recent.ours.iter().any(|o| o.0 == *key && o.1 == *pressed) {
+                continue;
+            }
+            recent.winit.push((*key, *pressed, now));
+        }
+        kept.push(event);
+    }
+    raw.events = kept;
     let keys: Vec<(u32, bool)> = KEYS.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default();
     let held = |vk: i32| unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
     let (ctrl, shift, alt) = (held(0x11), held(0x10), held(0x12));
     for (vk, pressed) in keys {
-        if let Some(key) = egui_key(vk) {
-            KEYS_INJECTED.fetch_add(1, Ordering::Relaxed);
-            raw.events.push(egui::Event::Key {
-                key,
-                physical_key: None,
-                pressed,
-                repeat: false,
-                modifiers: egui::Modifiers { alt, ctrl, shift, mac_cmd: false, command: ctrl },
-            });
+        let Some(key) = egui_key(vk) else { continue };
+        if recent.winit.iter().any(|o| o.0 == key && o.1 == pressed) {
+            continue;
         }
+        recent.ours.push((key, pressed, now));
+        KEYS_INJECTED.fetch_add(1, Ordering::Relaxed);
+        raw.events.push(egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers { alt, ctrl, shift, mac_cmd: false, command: ctrl },
+        });
     }
+}
+
+/// Windows passes files on the command line; there is no open-document event.
+pub fn register_open_handler(_ctx: &egui::Context) {}
+pub fn take_opened_files() -> Vec<String> {
+    Vec::new()
 }

@@ -335,3 +335,61 @@ pub fn screenshot(window: Option<&NSWindow>, path: &str) {
     };
     let _ = std::process::Command::new("/usr/sbin/screencapture").args(args).status();
 }
+
+// ---- Open With / double-click in Finder --------------------------------------------------------
+// Finder asks an app to open documents with an Apple Event ('aevt' 'odoc'). winit does not surface it,
+// so a small handler object collects the file paths for the UI to open.
+
+static OPENED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+static REPAINT: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
+
+objc2::define_class!(
+    #[unsafe(super(objc2_foundation::NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "RMPOpenDocumentsHandler"]
+    struct OpenHandler;
+
+    impl OpenHandler {
+        #[unsafe(method(handleOpen:withReply:))]
+        fn handle_open(&self, event: &objc2_foundation::NSAppleEventDescriptor, _reply: &objc2_foundation::NSAppleEventDescriptor) {
+            // keyDirectObject '----': a list of file URLs.
+            let Some(list) = event.paramDescriptorForKeyword(0x2D2D_2D2D) else { return };
+            let mut paths = Vec::new();
+            for i in 1..=list.numberOfItems() {
+                let Some(item) = list.descriptorAtIndex(i) else { continue };
+                // typeFileURL 'furl'
+                let Some(url) = item.coerceToDescriptorType(0x6675_726C).and_then(|d| d.stringValue()) else { continue };
+                if let Some(path) = url.to_string().strip_prefix("file://") {
+                    paths.push(percent_decode(path));
+                }
+            }
+            if let Ok(mut q) = OPENED.lock() {
+                q.extend(paths);
+            }
+            if let Some(ctx) = REPAINT.get() {
+                ctx.request_repaint();
+            }
+        }
+    }
+);
+
+/// Registers for open-document events. Call once, on the main thread, after the app has started.
+pub fn register_open_handler(ctx: &egui::Context) {
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let _ = REPAINT.set(ctx.clone());
+    let handler: Retained<OpenHandler> = unsafe { objc2::msg_send![mtm.alloc::<OpenHandler>(), init] };
+    unsafe {
+        objc2_foundation::NSAppleEventManager::sharedAppleEventManager().setEventHandler_andSelector_forEventClass_andEventID(
+            &handler,
+            objc2::sel!(handleOpen:withReply:),
+            0x6165_7674, // kCoreEventClass 'aevt'
+            0x6F64_6F63, // kAEOpenDocuments 'odoc'
+        );
+    }
+    std::mem::forget(handler); // the event manager keeps only a weak reference
+}
+
+/// Files Finder asked this app to open since the last call.
+pub fn take_opened_files() -> Vec<String> {
+    OPENED.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default()
+}

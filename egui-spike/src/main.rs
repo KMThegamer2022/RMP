@@ -468,6 +468,7 @@ impl App {
     fn start(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         self.started = true;
         appkit::set_app_icon(LOGO_PNG);
+        appkit::register_open_handler(ctx);
         self.surfaces = appkit::Surfaces::attach(frame);
         let view = self.surfaces.as_ref().map_or(std::ptr::null_mut(), |s| s.video_handle());
         self.engine = Engine::create(view);
@@ -765,6 +766,12 @@ impl eframe::App for App {
         // Windows has no continuous repaint from video, so keep frames coming for the clock and mouse polling.
         #[cfg(windows)]
         ctx.request_repaint_after(std::time::Duration::from_millis(30));
+        // Files Finder opened with RMP, and files dragged onto the window.
+        let mut incoming: Vec<(String, bool)> = appkit::take_opened_files().into_iter().map(|p| (p, false)).collect();
+        incoming.extend(ctx.input(|i| i.raw.dropped_files.iter().filter_map(|f| { let p = f.path(); (!p.as_os_str().is_empty()).then(|| (plain_path(p), false)) }).collect::<Vec<_>>()));
+        if !incoming.is_empty() && self.has_engine() {
+            self.accept(incoming);
+        }
         if appkit::take_video_double_click() && self.has_engine() {
             self.full(&ctx);
         }

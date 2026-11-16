@@ -20,7 +20,7 @@ objc2 = { version = "0.6.5", default-features = false }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSColor", "NSColorSpace", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSVisualEffectView", "NSWindow", "NSWindowScripting", "NSWorkspace", "objc2-core-foundation"] }
 objc2-av-foundation = { version = "0.3.2", features = ["AVAsset", "AVMetadataItem", "AVMetadataFormat", "AVCaptureDevice", "AVMediaFormat", "objc2-core-media"] }
 objc2-core-media = { version = "0.3.2", features = ["CMTime"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSFileManager", "NSGeometry", "NSObjCRuntime", "NSPathUtilities", "NSString", "NSURL", "NSValue"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSAppleEventDescriptor", "NSAppleEventManager", "NSObject", "objc2-core-services", "NSArray", "NSBundle", "NSData", "NSDictionary", "NSFileManager", "NSGeometry", "NSObjCRuntime", "NSPathUtilities", "NSString", "NSURL", "NSValue"] }
 
 [target.'cfg(windows)'.dependencies]
 eframe = { version = "0.37.0", features = ["wgpu"] }
