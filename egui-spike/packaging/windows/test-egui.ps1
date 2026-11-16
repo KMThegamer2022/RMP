@@ -15,7 +15,13 @@ public class In {
  [DllImport("user32",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
  [DllImport("user32")] public static extern IntPtr SendMessage(IntPtr w,uint m,IntPtr a,IntPtr b);
  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
- public static void Key(byte vk){ keybd_event(vk,0,0,UIntPtr.Zero); keybd_event(vk,0,2,UIntPtr.Zero); }
+ [StructLayout(LayoutKind.Explicit,Size=40)] public struct INPUT { [FieldOffset(0)] public uint type; [FieldOffset(8)] public ushort vk; [FieldOffset(10)] public ushort scan; [FieldOffset(12)] public uint flags; [FieldOffset(16)] public uint time; [FieldOffset(24)] public IntPtr extra; }
+ [DllImport("user32",SetLastError=true)] public static extern uint SendInput(uint n,ref INPUT i,int size);
+ public static void Key(byte vk){
+  INPUT i = new INPUT(); i.type=1; i.vk=vk; i.scan=(ushort)MapVirtualKey(vk,0);
+  SendInput(1,ref i,40); System.Threading.Thread.Sleep(60);
+  i.flags=2; SendInput(1,ref i,40); }
+ [DllImport("user32")] public static extern uint MapVirtualKey(uint code,uint type);
  public static void Click(int x,int y,int n){ SetCursorPos(x,y); for(int i=0;i<n;i++){ mouse_event(2,0,0,0,UIntPtr.Zero); mouse_event(4,0,0,0,UIntPtr.Zero); System.Threading.Thread.Sleep(60);} }
 }
 '@

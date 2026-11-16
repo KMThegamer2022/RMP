@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_queued={} keys_injected={}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} focus={} foreground_ours={} keys_seen={} keys_queued={} keys_injected={} hook={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -75,7 +75,8 @@ pub fn input_stats() -> String {
         app_active(),
         KEYS_SEEN.load(Ordering::Relaxed),
         KEYS_QUEUED.load(Ordering::Relaxed),
-        KEYS_INJECTED.load(Ordering::Relaxed)
+        KEYS_INJECTED.load(Ordering::Relaxed),
+        HOOK_STATUS.load(Ordering::Relaxed)
     )
 }
 
@@ -630,9 +631,13 @@ unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
     CallNextHookEx(std::ptr::null_mut(), code, wp, lp)
 }
 
+static HOOK_STATUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
+
 fn install_key_hook() {
     unsafe {
-        SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), GetModuleHandleW(std::ptr::null()), 0);
+        let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), GetModuleHandleW(std::ptr::null()), 0);
+        // 0 means it failed; otherwise the handle's low bits are kept for the test log.
+        HOOK_STATUS.store(if hook.is_null() { -(windows_sys::Win32::Foundation::GetLastError() as isize) - 1000 } else { 1 }, Ordering::Relaxed);
     }
 }
 
