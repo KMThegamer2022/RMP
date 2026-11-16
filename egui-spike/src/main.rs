@@ -1,1733 +1,698 @@
-//! egui spike: drives the existing Rust engine (repo-root src/lib.rs, the `ap_*` API) from egui.
-//! macOS only. Layouts and colours follow the shipping app (ui.m, themes.h). The shipping app is not changed.
+//! RMP with an egui interface, driving the existing Rust engine (repo-root src/lib.rs) on macOS.
+//! Behaviour follows the shipping AppKit app: ui.m, mac-menus.h, mac-library.h, mac-fullscreen.h,
+//! mac-terminal.h, mac-theme.h and updates/mac.h. The shipping app is not changed.
 
-use eframe::egui::{self, Color32, FontFamily, FontId, Painter, Pos2, Rect, Sense, Shape, Stroke, Vec2};
-use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::{NSAppearance, NSAppearanceCustomization, NSColor, NSView};
-use objc2_foundation::{NSPoint, NSRect, NSSize};
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::ffi::{c_void, CString};
-use std::path::PathBuf;
-
-// Engine: repo-root src/lib.rs compiled as this crate's library (see Cargo.toml [lib]).
-use egui_spike as engine;
-
+mod appkit;
+mod commands;
+mod dialogs;
+mod engine;
+mod layout;
+mod media;
 mod menus;
+mod metadata;
+mod script;
+mod store;
 mod terminal;
-use menus::Native;
+mod theme;
+mod updates;
+mod widgets;
 
-/// Settings from the Preferences and Customize Interface dialogs (ui.m configureView).
-#[derive(Clone, Copy, PartialEq)]
-pub struct Settings {
-    pub advanced: bool,
-    pub status_bar: bool,
-    pub dock_playlist: bool,
-    pub startup_volume: i32,
+use eframe::egui;
+use engine::Engine;
+use std::collections::HashMap;
+use std::sync::mpsc::Receiver;
+use std::time::Instant;
+use store::Store;
+use theme::Skin;
+
+const CONE_PNG: &[u8] = include_bytes!("../../assets/vlc-cone.png");
+const LOGO_PNG: &[u8] = include_bytes!("../../assets/RMP.png");
+const LINK_TARGET: &str = "https://www.youtube.com/watch?v=yEh_4GqXqFc";
+/// egui lays SF out about 12% narrower than AppKit does, so explicit font sizes are scaled to match
+/// the shipping text widths (measured on "Previous", the clock and the 18 pt item name).
+pub fn fs(size: f32) -> f32 {
+    size * 1.12
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self { advanced: false, status_bar: false, dock_playlist: true, startup_volume: 80 }
-    }
-}
+/// How long the fullscreen transport stays up after the mouse last moved (refreshFloating).
+const FLOAT_HIDE_SECS: f64 = 2.5;
 
-fn settings_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike/settings.txt"))
-}
-
-fn load_settings() -> Settings {
-    let mut s = Settings::default();
-    let Some(text) = settings_path().and_then(|p| std::fs::read_to_string(p).ok()) else { return s };
-    for line in text.lines() {
-        let Some((k, v)) = line.split_once('=') else { continue };
-        match k {
-            "advanced" => s.advanced = v == "1",
-            "status_bar" => s.status_bar = v == "1",
-            "dock_playlist" => s.dock_playlist = v == "1",
-            "startup_volume" => s.startup_volume = v.parse().unwrap_or(80),
-            _ => {}
-        }
-    }
-    s
-}
-
-fn save_settings(s: &Settings) {
-    let Some(path) = settings_path() else { return };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let text = format!(
-        "advanced={}\nstatus_bar={}\ndock_playlist={}\nstartup_volume={}\n",
-        s.advanced as u8, s.status_bar as u8, s.dock_playlist as u8, s.startup_volume
-    );
-    let _ = std::fs::write(path, text);
-}
-
-/// Dialogs raised by menu items.
-pub enum Dialog {
-    Preferences,
-    Customize,
-}
-
-/// Text prompts raised by menu items (Open Network Stream…, Jump to Specific Time…).
-pub enum Prompt {
-    Stream(String),
-    Time(String),
-}
-
-const RECENT_MAX: usize = 20;
-
-fn recent_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike/recent.txt"))
-}
-
-fn load_recent() -> Vec<String> {
-    recent_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(String::from).collect())
-        .unwrap_or_default()
-}
-
-const INSET: f32 = 16.0;
-const ROW_GAP: f32 = 8.0;
-const TIMELINE_H: f32 = 21.0;
-const BUTTON_H: f32 = 30.0;
-const BOTTOM_INSET: f32 = 12.0;
-const CLOCK_W: f32 = 84.0;
-const VOLUME_W: f32 = 85.0;
-const CONE_SIZE: f32 = 120.0;
-/// Height of the media header and width of the sidebar in the XP and Windows 7 layouts (mac-library.h).
-const MEDIA_HEADER_H: f32 = 58.0;
-const MEDIA_SIDEBAR_W: f32 = 133.0;
-
-/// Pages of the XP and Windows 7 media layout (the sidebar buttons).
+/// Pages of the XP and Windows 7 media layout (mediaPage in mac-library.h).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MediaPage {
     NowPlaying,
     Library,
     Playlist,
 }
-const CONE_PNG: &[u8] = include_bytes!("../../assets/vlc-cone.png");
-const LINK_TARGET: &str = "https://www.youtube.com/watch?v=yEh_4GqXqFc";
-const LOGO_PNG: &[u8] = include_bytes!("../../assets/RMP.png");
-/// Size of the logo shown when paused or stopped (pausedMark in ui.m).
-const MARK_SIZE: f32 = 96.0;
-/// How long the fullscreen transport stays up after the mouse last moved (mac-fullscreen.h).
-const FLOAT_HIDE_SECS: f32 = 2.5;
 
-fn rgb(v: u32) -> Color32 {
-    Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
-}
-
-/// The shipping app's skins, in the View → Theme menu order (ui.m), with their themes.h indices.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Skin {
-    Vlc,
-    RmpDefault,
-    Modern,
-    Seven,
-    Xp,
-    Mac,
-    Linux,
-}
-
-const SKINS: [Skin; 7] = [Skin::Vlc, Skin::RmpDefault, Skin::Modern, Skin::Seven, Skin::Xp, Skin::Mac, Skin::Linux];
-
-impl Skin {
-    fn label(self) -> &'static str {
+impl MediaPage {
+    pub fn index(self) -> usize {
         match self {
-            Skin::Vlc => "VLC",
-            Skin::RmpDefault => "RMP Default",
-            Skin::Modern => "Windows 10/11",
-            Skin::Seven => "Windows 7",
-            Skin::Xp => "Windows XP",
-            Skin::Mac => "Mac",
-            Skin::Linux => "Linux",
-        }
-    }
-    /// Stable id for the saved preference file and the RMP_SPIKE_THEME override.
-    fn slug(self) -> &'static str {
-        match self {
-            Skin::Vlc => "vlc",
-            Skin::RmpDefault => "rmp-default",
-            Skin::Modern => "win10",
-            Skin::Seven => "win7",
-            Skin::Xp => "xp",
-            Skin::Mac => "mac",
-            Skin::Linux => "linux",
-        }
-    }
-    /// themes.h index (the shipping app's PlayerTheme value).
-    fn index(self) -> i32 {
-        match self {
-            Skin::Modern => 0,
-            Skin::Seven => 1,
-            Skin::Xp => 2,
-            Skin::Mac => 3,
-            Skin::RmpDefault => 4,
-            Skin::Vlc => 5,
-            Skin::Linux => 6,
-        }
-    }
-    fn from_slug(s: &str) -> Option<Skin> {
-        SKINS.into_iter().find(|k| k.slug() == s.trim())
-    }
-    fn theme(self) -> Theme {
-        // Values from themes.h. Rows: panel, edge, face, highlight, text, accent, radius.
-        let (panel, edge, face, highlight, text, accent, radius, dark) = match self {
-            Skin::Modern => (0x101010, 0x555555, 0x101010, 0x303030, 0xffffff, 0x399bdb, 0.0, false),
-            Skin::Seven => (0xd2e3f1, 0x8198ae, 0xb5ccdf, 0xffffff, 0x123150, 0x2673b5, 6.0, false),
-            Skin::Xp => (0xece9d8, 0x30537f, 0xe4dfcc, 0xfffef7, 0x171710, 0x245edb, 3.0, false),
-            Skin::Mac => (0x303034, 0x696970, 0x525257, 0x525257, 0xffffff, 0x286bd1, 10.0, true),
-            Skin::RmpDefault => (0x171a21, 0x414756, 0x292e39, 0x353b49, 0xf4f5f7, 0xff7848, 8.0, true),
-            Skin::Vlc => (0xf2f2f2, 0xb4b4b4, 0xf8f8f8, 0xffffff, 0x535353, 0x57bb39, 2.0, false),
-            Skin::Linux => (0x101611, 0x37483b, 0x142019, 0x213527, 0xd3e8d7, 0x83dc9b, 0.0, true),
-        };
-        Theme {
-            panel: rgb(panel),
-            edge: rgb(edge),
-            face: rgb(face),
-            highlight: rgb(highlight),
-            text: rgb(text),
-            accent: rgb(accent),
-            radius,
-            dark,
+            MediaPage::NowPlaying => 0,
+            MediaPage::Library => 1,
+            MediaPage::Playlist => 2,
         }
     }
 }
 
-#[derive(Clone, Copy)]
-struct Theme {
-    panel: Color32,
-    edge: Color32,
-    face: Color32,
-    highlight: Color32,
-    text: Color32,
-    accent: Color32,
-    radius: f32,
-    dark: bool,
+/// Textures the UI draws: the cone, the RMP logo, SF Symbols and cover art.
+#[derive(Default)]
+pub struct Textures {
+    pub cone: Option<egui::TextureHandle>,
+    pub logo: Option<egui::TextureHandle>,
+    pub symbols: HashMap<String, Option<egui::TextureHandle>>,
+    pub covers: HashMap<String, Option<egui::TextureHandle>>,
 }
 
-/// Preference file: ~/Library/Application Support/RMP egui spike/theme.txt holds the skin slug.
-fn config_path() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike/theme.txt"))
-}
-
-fn load_skin() -> Skin {
-    if let Some(s) = std::env::var("RMP_SPIKE_THEME").ok().and_then(|s| Skin::from_slug(&s)) {
-        return s; // Override for screenshot runs; not saved.
-    }
-    config_path()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| Skin::from_slug(&s))
-        .unwrap_or(Skin::Vlc) // ui.m registers VLC_THEME as the default.
-}
-
-fn save_skin(skin: Skin) {
-    if std::env::var_os("RMP_SPIKE_THEME").is_some() {
-        return;
-    }
-    if let Some(p) = config_path() {
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
+impl Textures {
+    pub fn symbol(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+        if let Some(t) = self.symbols.get(name) {
+            return t.clone();
         }
-        let _ = std::fs::write(p, skin.slug());
+        // Template symbols render black; make them white so Image::tint colours them.
+        let t = appkit::symbol_image(name, 16.0).map(|mut img| {
+            for px in img.pixels.iter_mut() {
+                *px = egui::Color32::from_white_alpha(px.a());
+            }
+            ctx.load_texture(format!("sf-{name}"), img, egui::TextureOptions::LINEAR)
+        });
+        self.symbols.insert(name.to_string(), t.clone());
+        t
+    }
+    /// A symbol rendered at 100 pt for the queue art.
+    pub fn symbol_large(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+        let key = format!("{name}@large");
+        if let Some(t) = self.symbols.get(&key) {
+            return t.clone();
+        }
+        let t = appkit::symbol_image(name, 100.0).map(|mut img| {
+            for px in img.pixels.iter_mut() {
+                *px = egui::Color32::from_white_alpha(px.a());
+            }
+            ctx.load_texture(format!("sf-{key}"), img, egui::TextureOptions::LINEAR)
+        });
+        self.symbols.insert(key, t.clone());
+        t
+    }
+    pub fn cover(&mut self, ctx: &egui::Context, path: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+        if let Some(t) = self.covers.get(path) {
+            return t.clone();
+        }
+        let t = image::load_from_memory(bytes).ok().map(|img| {
+            let img = img.to_rgba8();
+            let size = [img.width() as usize, img.height() as usize];
+            ctx.load_texture(format!("cover-{path}"), egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR)
+        });
+        self.covers.insert(path.to_string(), t.clone());
+        t
     }
 }
 
-struct App {
-    player: *mut engine::Player,
-    video_view: Option<Retained<NSView>>,
-    /// winit's content view (egui draws into it); the video view sits behind it in the frame view.
-    content_view: Option<Retained<NSView>>,
-    cone: Option<egui::TextureHandle>,
-    file: Option<PathBuf>,
-    status: String,
-    volume: i32,
-    scrub: Option<i64>,
-    last_state: i32,
-    skin: Skin,
+fn png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [img.width() as usize, img.height() as usize];
+    Some(ctx.load_texture(name, egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()), egui::TextureOptions::LINEAR))
+}
+
+pub struct App {
+    pub engine: Option<Engine>,
+    pub surfaces: Option<appkit::Surfaces>,
+    pub store: Store,
+    pub skin: Skin,
     applied_skin: Option<Skin>,
-    title_cmd: Option<String>,
-    presentation_fullscreen: Option<bool>,
-    recent: Vec<String>,
-    settings: Settings,
-    dialog: Option<Dialog>,
-    show_queue: bool,
-    media_page: MediaPage,
-    library_search: String,
-    prompt: Option<Prompt>,
-    note: Option<(String, String)>,
-    /// Last mouse movement; the fullscreen transport shows for a while after it.
-    last_motion: std::time::Instant,
-    was_fullscreen: bool,
-    logo: Option<egui::TextureHandle>,
-    term: terminal::Terminal,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Icon {
-    Play,
-    Pause,
-    Prev,
-    Next,
-    Stop,
-    Fullscreen,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Item {
-    Play,
-    Prev,
-    Stop,
-    Next,
-    Fullscreen,
-    Queue,
-    Repeat,
-    Shuffle,
-    Spacer,
-    VolumeLabel,
-    Volume,
-}
-
-/// Order of the bottom row per skin, from applyTheme in ui.m.
-fn bottom_items(skin: Skin) -> Vec<Item> {
-    use Item::*;
-    match skin {
-        Skin::Seven => vec![Shuffle, Repeat, Stop, Prev, Play, Next, Volume, Fullscreen],
-        Skin::Xp => vec![Play, Stop, Prev, Next, Volume, Repeat, Shuffle, Fullscreen],
-        _ => vec![Play, Prev, Stop, Next, Fullscreen, Queue, Repeat, Shuffle, Spacer, VolumeLabel, Volume],
-    }
+    pub tex: Textures,
+    pub status: String,
+    pub volume: i32,
+    pub scrub: Option<i64>,
+    /// refresh: the state seen on the previous tick (-1 right after a launch).
+    previous: i32,
+    pub quit_at_end: bool,
+    pub recording: bool,
+    pub wallpaper: Option<appkit::WallpaperRestore>,
+    pub always_top: bool,
+    pub minimal: bool,
+    pub playlist_shown: bool,
+    pub repeat_one: bool,
+    pub shuffle: bool,
+    pub pending_video_switch: bool,
+    pub media_page: MediaPage,
+    pub search: String,
+    pub search_cursor: usize,
+    pub selected_row: Option<usize>,
+    pub queue_selected: Option<usize>,
+    pub effect_values: HashMap<String, String>,
+    pub dialogs: Vec<dialogs::Dialog>,
+    pub in_full: bool,
+    presentation_full: Option<bool>,
+    last_pointer: (f64, f64),
+    last_activity: Instant,
+    pub float_visible: bool,
+    pub title: String,
+    title_sent: String,
+    pub name: String,
+    pub term: terminal::Terminal,
+    pub meta: metadata::Loader,
+    pub update_rx: Option<(Receiver<updates::Outcome>, bool)>,
+    pub pending_edit: Option<menus::Action>,
+    pub folder_rx: Option<Receiver<Vec<String>>>,
+    pub capture_rx: Option<Receiver<(bool, String)>>,
+    pub quit_requested: bool,
+    pub force_button: std::cell::Cell<Option<usize>>,
+    /// Paths the test script supplies in place of the next file picker(s).
+    pub pick: Vec<std::path::PathBuf>,
+    pub script: Option<script::Script>,
+    app_active: bool,
+    started: bool,
 }
 
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
-        let skin = load_skin();
-        Self {
-            player: std::ptr::null_mut(),
-            video_view: None,
-            content_view: None,
-            cone: None,
-            file: None,
+        let store = Store::load();
+        let skin = store.theme;
+        let mut tex = Textures::default();
+        tex.cone = png_texture(&cc.egui_ctx, "vlc-cone", CONE_PNG);
+        tex.logo = png_texture(&cc.egui_ctx, "rmp-logo", LOGO_PNG);
+        App {
+            engine: None,
+            surfaces: None,
+            store,
+            skin,
+            applied_skin: None,
+            tex,
             status: "Ready".into(),
             volume: 80,
             scrub: None,
-            last_state: 0,
-            skin,
-            applied_skin: None,
-            title_cmd: None,
-            presentation_fullscreen: None,
-            recent: load_recent(),
-            settings: load_settings(),
-            dialog: None,
-            show_queue: false,
-            media_page: MediaPage::NowPlaying,
-            library_search: String::new(),
-            prompt: None,
-            note: None,
-            last_motion: std::time::Instant::now(),
-            was_fullscreen: false,
-            logo: None,
+            previous: 0,
+            quit_at_end: false,
+            recording: false,
+            wallpaper: None,
+            always_top: false,
+            minimal: false,
+            playlist_shown: false,
+            repeat_one: false,
+            shuffle: false,
+            pending_video_switch: false,
+            // applyTheme: Windows 7 opens on the library, every other skin on Now Playing.
+            media_page: if skin == Skin::Seven { MediaPage::Library } else { MediaPage::NowPlaying },
+            search: String::new(),
+            search_cursor: 0,
+            selected_row: None,
+            queue_selected: None,
+            effect_values: HashMap::new(),
+            dialogs: Vec::new(),
+            in_full: false,
+            presentation_full: None,
+            last_pointer: (0.0, 0.0),
+            last_activity: Instant::now(),
+            float_visible: false,
+            title: "RMP".into(),
+            title_sent: String::new(),
+            name: "RMP".into(),
             term: terminal::Terminal::new(),
+            meta: metadata::Loader::new(),
+            update_rx: None,
+            pending_edit: None,
+            folder_rx: None,
+            capture_rx: None,
+            quit_requested: false,
+            force_button: std::cell::Cell::new(None),
+            pick: Vec::new(),
+            script: script::Script::load(),
+            app_active: true,
+            started: false,
         }
     }
 
-    fn player(&mut self) -> Option<&mut engine::Player> {
-        // SAFETY: from ap_create; lives until Drop; UI thread only.
-        unsafe { self.player.as_mut() }
+    pub fn has_engine(&self) -> bool {
+        self.engine.is_some()
+    }
+    pub fn state(&self) -> i32 {
+        self.engine.as_ref().map_or(0, |e| e.state())
+    }
+    pub fn count(&self) -> usize {
+        self.engine.as_ref().map_or(0, |e| e.count())
+    }
+    pub fn index(&self) -> isize {
+        self.engine.as_ref().map_or(-1, |e| e.index())
     }
 
-    fn state(&mut self) -> i32 {
-        match self.player() {
-            Some(p) => unsafe { engine::ap_state(p) },
-            None => 0,
+    /// The layout is "regular" when nothing hides the chrome (updateViewControls).
+    pub fn regular(&self) -> bool {
+        !self.in_full && !self.minimal && self.wallpaper.is_none() && self.skin != Skin::Linux
+    }
+    /// arrangeChrome: bare = inFull || terminal || wallpaper || minimalInterface.
+    pub fn bare(&self) -> bool {
+        self.in_full || self.skin == Skin::Linux || self.wallpaper.is_some() || self.minimal
+    }
+    /// layoutMediaChrome: active = hasMediaLayout && !inFull && !minimalInterface && !wallpaper.
+    pub fn media_active(&self) -> bool {
+        self.skin.has_media_layout() && !self.in_full && !self.minimal && self.wallpaper.is_none()
+    }
+
+    // ---- Playback (ui.m) ------------------------------------------------------------------------
+
+    /// accept: queue the sources and play the first new one.
+    pub fn accept(&mut self, sources: Vec<(String, bool)>) {
+        let Some(e) = self.engine.as_mut() else { return };
+        let start = e.count();
+        let n = sources.len();
+        for (s, network) in sources {
+            e.add(&s, network);
+        }
+        if n > 0 {
+            self.launch(start);
         }
     }
 
-    fn open_file(&mut self, path: PathBuf) {
-        let Ok(c) = CString::new(path.to_string_lossy().as_bytes()) else {
-            self.status = "Path contains a NUL byte".into();
+    /// launch: show the item, remember it, play it.
+    pub fn launch(&mut self, i: usize) {
+        if i >= self.count() {
             return;
-        };
-        let Some(p) = self.player() else { return };
-        unsafe {
-            engine::ap_stop(p);
-            let index = engine::ap_count(p);
-            engine::ap_add(p, c.as_ptr(), false);
-            let ok = engine::ap_play(p, index);
-            self.status = if ok { "Opening…".into() } else { "Could not open media".into() };
         }
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        self.title_cmd = Some(format!("RMP — {name}"));
-        self.file = Some(path);
+        self.show_playing_item(i);
+        let item = self.engine.as_ref().and_then(|e| e.item(i)).unwrap_or_default();
+        self.store.remember_recent(&item);
+        let ok = self.engine.as_mut().is_some_and(|e| e.play(i));
+        self.status = if ok { "Opening…".into() } else { "Could not open media".into() };
     }
 
-    fn toggle(&mut self) {
-        let state = self.state();
-        let Some(p) = self.player() else { return };
-        if (1..=4).contains(&state) {
-            unsafe { engine::ap_toggle(p) };
-        } else if unsafe { engine::ap_count(p) } > 0 {
-            let i = usize::try_from(unsafe { engine::ap_index(p) }).unwrap_or(0);
-            unsafe { engine::ap_play(p, i) };
+    /// showPlayingItem: title, name, and the Windows 7 switch back to the video once it starts.
+    pub fn show_playing_item(&mut self, i: usize) {
+        if i >= self.count() {
+            return;
         }
+        self.previous = -1;
+        self.name = self.engine.as_ref().map(|e| e.display(i)).unwrap_or_default();
+        self.title = format!("RMP — {}", self.name);
+        self.pending_video_switch = self.skin == Skin::Seven && self.media_page != MediaPage::NowPlaying;
     }
 
-    fn step(&mut self, delta: isize) {
-        let Some(p) = self.player() else { return };
-        let count = unsafe { engine::ap_count(p) } as isize;
-        let next = unsafe { engine::ap_index(p) } + delta;
-        if next >= 0 && next < count {
-            unsafe { engine::ap_play(p, next as usize) };
+    /// toggle: with an empty queue, Play opens the file picker.
+    pub fn toggle(&mut self) {
+        if self.count() == 0 {
+            self.open_files(true);
+        } else if let Some(e) = self.engine.as_mut() {
+            e.toggle();
         }
     }
 
-    fn set_volume(&mut self, v: i32) {
-        self.volume = v.clamp(0, 100);
-        let volume = self.volume;
-        if let Some(p) = self.player() {
-            unsafe { engine::ap_volume(p, volume) };
+    pub fn prev(&mut self) {
+        let i = self.index();
+        if i > 0 {
+            self.launch(i as usize - 1);
+        } else if self.count() > 0 {
+            self.launch(0);
         }
     }
 
-    fn set_skin(&mut self, skin: Skin) {
-        self.skin = skin;
-        if skin == Skin::Linux {
-            self.term.hidden = false; // showTerminal in ui.m: the terminal opens with the Linux skin
-        }
-        save_skin(skin);
-    }
-
-    fn open_dialog(&mut self, multi: bool) {
-        let filter = ["mp4", "mkv", "mov", "mp3", "flac", "wav", "m4a", "avi", "webm", "ogg"];
-        let dialog = rfd::FileDialog::new().add_filter("Media", &filter);
-        let paths = if multi { dialog.pick_files().unwrap_or_default() } else { dialog.pick_file().into_iter().collect() };
-        for (i, path) in paths.into_iter().enumerate() {
-            if i == 0 {
-                self.open_path(path);
-            } else {
-                self.add_to_queue(&path);
-            }
-        }
-    }
-
-    /// Opens a file and records it in Open Recent Media.
-    pub fn open_path(&mut self, path: PathBuf) {
-        self.open_file(path.clone());
-        self.remember_recent(&path);
-    }
-
-    fn add_to_queue(&mut self, path: &std::path::Path) {
-        let Ok(c) = CString::new(path.to_string_lossy().as_bytes()) else { return };
-        if let Some(p) = self.player() {
-            unsafe { engine::ap_add(p, c.as_ptr(), false) };
-        }
-        self.remember_recent(path);
-    }
-
-    fn remember_recent(&mut self, path: &std::path::Path) {
-        let text = path.to_string_lossy().into_owned();
-        self.recent.retain(|r| r != &text);
-        self.recent.insert(0, text);
-        self.recent.truncate(RECENT_MAX);
-        if let Some(file) = recent_path() {
-            if let Some(dir) = file.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(file, self.recent.join("\n"));
-        }
-    }
-
-    pub fn clear_recent(&mut self) {
-        self.recent.clear();
-        if let Some(file) = recent_path() {
-            let _ = std::fs::remove_file(file);
-        }
-    }
-
-    /// Plays a network URL (Open Network Stream…). The engine resolves it like a local path.
-    fn open_location(&mut self, url: &str) {
-        let Ok(c) = CString::new(url) else { return };
-        let Some(p) = self.player() else { return };
-        unsafe {
-            engine::ap_stop(p);
-            let index = engine::ap_count(p);
-            engine::ap_add(p, c.as_ptr(), true);
-            let ok = engine::ap_play(p, index);
-            self.status = if ok { "Opening…".into() } else { "Could not open media".into() };
-        }
-        self.title_cmd = Some(format!("RMP — {url}"));
-        self.remember_recent(std::path::Path::new(url));
-    }
-
-    /// Creates the child NSView that libvlc draws into, inside the screen rect above the egui view.
-    fn attach_video(&mut self, frame: &eframe::Frame) {
-        let Some(mtm) = MainThreadMarker::new() else { return };
-        let Some(parent) = content_view(frame) else { return };
-        let child = unsafe {
-            NSView::initWithFrame(NSView::alloc(mtm), NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0)))
-        };
-        child.setWantsLayer(true);
-        // Behind the egui view, in the window's frame view. egui draws its controls and menus on top,
-        // and the egui view is clear over the screen rect, so the video shows through and stays visible
-        // while a menu is open.
-        let Some(frame_view) = (unsafe { parent.superview() }) else { return };
-        frame_view.addSubview_positioned_relativeTo(&child, objc2_app_kit::NSWindowOrderingMode::Below, Some(parent));
-        // SAFETY: winit's content view stays alive while the window does; we keep a retained handle.
-        self.content_view = Some(unsafe { Retained::retain(parent as *const NSView as *mut NSView) }.expect("content view"));
-        let raw = Retained::as_ptr(&child) as *mut c_void;
-        self.player = unsafe { engine::ap_create(raw) };
-        if let Some(p) = self.player() {
-            engine::ap_prepare(p);
-            unsafe { engine::ap_volume(p, 80) };
-        }
-        self.video_view = Some(child);
-    }
-
-    /// Moves the video view to `rect` (egui points, top-left origin) inside the content view.
-    fn place_video(&self, rect: Rect) {
-        let (Some(view), Some(content)) = (&self.video_view, &self.content_view) else { return };
-        let Some(frame_view) = (unsafe { view.superview() }) else { return };
-        // The rect is in egui's coordinates, relative to the content view.
-        let y = if content.isFlipped() {
-            rect.min.y
+    pub fn next(&mut self) {
+        let n = self.count();
+        let i = self.index();
+        if self.shuffle && n > 1 {
+            let r = random_below(n - 1);
+            self.launch(((i + 1) as usize + r) % n);
         } else {
-            content.bounds().size.height as f32 - rect.max.y
-        };
-        let in_content = NSRect::new(
-            NSPoint::new(rect.min.x as f64, y as f64),
-            NSSize::new(rect.width() as f64, rect.height() as f64),
-        );
-        let in_frame = content.convertRect_toView(in_content, Some(&frame_view));
-        view.setFrame(in_frame);
+            self.launch((i + 1) as usize);
+        }
     }
 
-    /// Title bar and window appearance for the current skin (ThemeSurface / applyTheme in ui.m).
-    fn apply_chrome(&mut self, frame: &eframe::Frame, ctx: &egui::Context) {
+    pub fn stop(&mut self) {
+        if let Some(e) = self.engine.as_mut() {
+            e.stop();
+        }
+    }
+
+    pub fn set_volume(&mut self, v: i32) {
+        self.volume = v.clamp(0, 100);
+        let v = self.volume;
+        if let Some(e) = self.engine.as_mut() {
+            e.set_volume(v);
+        }
+    }
+
+    pub fn seek(&mut self, ms: i64) {
+        if let Some(e) = self.engine.as_mut() {
+            e.seek(ms);
+        }
+    }
+
+    /// full: leave wallpaper mode first, then toggle fullscreen.
+    pub fn full(&mut self, ctx: &egui::Context) {
+        if self.wallpaper.is_some() {
+            self.toggle_wallpaper();
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!self.in_full));
+    }
+
+    /// pickTheme: remember the theme before Linux so `theme back` can return to it.
+    pub fn pick_theme(&mut self, skin: Skin) {
+        if skin == Skin::Linux && self.skin != Skin::Linux {
+            self.store.previous_theme = Some(self.skin);
+        }
+        self.apply_theme(skin);
+        self.store.theme = skin;
+        self.store.save();
+    }
+
+    /// applyTheme's state changes; the window chrome follows in `apply_chrome`.
+    fn apply_theme(&mut self, skin: Skin) {
+        let old = self.skin;
+        self.skin = skin;
+        if old != skin {
+            self.pending_video_switch = false;
+            self.media_page = if skin == Skin::Seven { MediaPage::Library } else { MediaPage::NowPlaying };
+            self.search.clear();
+            self.selected_row = None;
+        }
+        if skin == Skin::Linux {
+            self.term.hidden = false; // showTerminal
+        }
+    }
+
+    pub fn note(&mut self, title: impl Into<String>, detail: impl Into<String>) {
+        self.dialogs.push(dialogs::Dialog::Note { title: title.into(), detail: detail.into() });
+    }
+
+    /// The tick from refresh: (every 0.2 s in the shipping app; every frame here).
+    fn refresh(&mut self, ctx: &egui::Context) {
+        let Some(e) = self.engine.as_ref() else { return };
+        let state = e.state();
+        let has_video = e.has_video();
+        let index = e.index();
+        let count = e.count();
+        if self.pending_video_switch && has_video {
+            self.pending_video_switch = false;
+            self.media_page = MediaPage::NowPlaying;
+        }
+        if state >= 6 {
+            self.pending_video_switch = false;
+        }
+        if state == 6 && self.previous != 6 && self.repeat_one {
+            self.launch(index.max(0) as usize);
+            return;
+        }
+        if state == 6 && self.previous != 6 && (self.shuffle || index + 1 < count as isize) {
+            self.next();
+            return;
+        }
+        if state == 6 && self.previous != 6 && self.quit_at_end {
+            self.quit_requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        self.previous = state;
+        const STATES: [&str; 8] = ["Ready", "Opening…", "Buffering…", "Playing", "Paused", "Stopped", "Finished", "Playback error"];
+        self.status = STATES[state.clamp(0, 7) as usize].to_string();
+    }
+
+    /// refreshFloating: the fullscreen transport shows when the mouse moves or rests on it, and hides
+    /// 2.5 s after the last movement.
+    fn refresh_floating(&mut self, pointer_on_panel: bool) {
+        let point = appkit::mouse_location();
+        let now = Instant::now();
+        if point != self.last_pointer || (self.float_visible && pointer_on_panel) {
+            self.last_activity = now;
+            self.float_visible = true;
+        } else if now.duration_since(self.last_activity).as_secs_f64() > FLOAT_HIDE_SECS {
+            self.float_visible = false;
+        }
+        self.last_pointer = point;
+    }
+
+    /// Window chrome for the skin (applyTheme): appearance, background, glass, title text colour.
+    fn apply_chrome(&mut self, ctx: &egui::Context) {
         if self.applied_skin == Some(self.skin) {
             return;
         }
-        let Some(view) = content_view(frame) else { return };
-        let Some(window) = view.window() else { return };
-        let skin = self.skin;
-        let th = skin.theme();
-        window.setTitlebarAppearsTransparent(true);
-        let appearance = unsafe {
-            if th.dark {
-                NSAppearance::appearanceNamed(objc2_app_kit::NSAppearanceNameDarkAqua)
-            } else {
-                NSAppearance::appearanceNamed(objc2_app_kit::NSAppearanceNameAqua)
-            }
-        };
-        window.setAppearance(appearance.as_deref());
-        let bg = if skin == Skin::Xp {
-            rgb(0xece9d8)
-        } else if skin == Skin::Modern {
-            rgb(0xf5f5f5)
-        } else {
-            th.panel
-        };
-        let [r, g, b, _] = bg.to_array();
-        let ns = NSColor::colorWithSRGBRed_green_blue_alpha(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0, 1.0);
-        window.setBackgroundColor(Some(&ns));
+        let Some(window) = self.surfaces.as_ref().and_then(|s| s.window()) else { return };
+        let th = self.skin.theme();
+        appkit::apply_window_chrome(&window, self.skin, self.translucent());
+        ctx.send_viewport_cmd(egui::ViewportCommand::SetTheme(if th.dark { egui::SystemTheme::Dark } else { egui::SystemTheme::Light }));
         ctx.set_visuals(if th.dark { egui::Visuals::dark() } else { egui::Visuals::light() });
-        self.applied_skin = Some(skin);
+        if self.always_top {
+            appkit::set_floating(&window, true);
+        }
+        self.applied_skin = Some(self.skin);
     }
-}
 
-/// winit's content NSView for this window.
-fn content_view(frame: &eframe::Frame) -> Option<&NSView> {
-    let h = frame.window_handle().ok()?;
-    let RawWindowHandle::AppKit(a) = h.as_raw() else { return None };
-    // SAFETY: winit keeps the content view alive for the window's lifetime.
-    Some(unsafe { &*(a.ns_view.as_ptr() as *const NSView) })
-}
-
-/// Vertical gradient with colour stops at fractions (0..1) of the rect height.
-fn vgradient(painter: &Painter, r: Rect, stops: &[(f32, Color32)]) {
-    let mut m = egui::Mesh::default();
-    for w in stops.windows(2) {
-        let (t0, c0) = w[0];
-        let (t1, c1) = w[1];
-        let y0 = r.top() + r.height() * t0;
-        let y1 = r.top() + r.height() * t1;
-        let base = m.vertices.len() as u32;
-        m.colored_vertex(Pos2::new(r.left(), y0), c0);
-        m.colored_vertex(Pos2::new(r.right(), y0), c0);
-        m.colored_vertex(Pos2::new(r.right(), y1), c1);
-        m.colored_vertex(Pos2::new(r.left(), y1), c1);
-        m.add_triangle(base, base + 1, base + 2);
-        m.add_triangle(base, base + 2, base + 3);
+    /// Windows 7 glass unless the user reduced transparency.
+    pub fn translucent(&self) -> bool {
+        self.skin == Skin::Seven && !appkit::reduce_transparency()
     }
-    painter.add(Shape::mesh(m));
-}
 
-fn draw_icon(painter: &Painter, c: Pos2, icon: Icon, ink: Color32) {
-    let tri = |pts: Vec<Pos2>| Shape::convex_polygon(pts, ink, Stroke::NONE);
-    match icon {
-        Icon::Play => {
-            painter.add(tri(vec![Pos2::new(c.x - 4.0, c.y - 6.0), Pos2::new(c.x + 6.0, c.y), Pos2::new(c.x - 4.0, c.y + 6.0)]));
+    pub fn toggle_wallpaper(&mut self) {
+        let Some(window) = self.surfaces.as_ref().and_then(|s| s.window()) else { return };
+        if let Some(restore) = self.wallpaper.take() {
+            appkit::leave_wallpaper(&window, &restore, self.always_top);
+        } else {
+            if self.in_full {
+                self.note("Set as Wallpaper", "Leave fullscreen to use the playback window as your desktop wallpaper.");
+                return;
+            }
+            self.wallpaper = Some(appkit::enter_wallpaper(&window));
         }
-        Icon::Pause => {
-            painter.rect_filled(Rect::from_center_size(Pos2::new(c.x - 3.0, c.y), Vec2::new(3.0, 12.0)), 0.0, ink);
-            painter.rect_filled(Rect::from_center_size(Pos2::new(c.x + 3.0, c.y), Vec2::new(3.0, 12.0)), 0.0, ink);
+    }
+
+    fn start(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
+        self.started = true;
+        appkit::set_app_icon(LOGO_PNG);
+        self.surfaces = appkit::Surfaces::attach(frame);
+        let view = self.surfaces.as_ref().map_or(std::ptr::null_mut(), |s| s.video_handle());
+        self.engine = Engine::create(view);
+        if self.engine.is_none() {
+            // ui.m: "RMP could not load its playback engine." then quit.
+            self.note("RMP could not load its playback engine.", "");
+            return;
         }
-        Icon::Prev => {
-            painter.rect_filled(Rect::from_center_size(Pos2::new(c.x - 6.0, c.y), Vec2::new(2.0, 10.0)), 0.0, ink);
-            painter.add(tri(vec![Pos2::new(c.x + 6.0, c.y - 5.0), Pos2::new(c.x - 4.0, c.y), Pos2::new(c.x + 6.0, c.y + 5.0)]));
+        // StartupVolume when the user set one in Preferences; the slider default is 80.
+        let v = self.store.startup_volume.unwrap_or(80);
+        self.set_volume(v);
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if !args.is_empty() {
+            let sources = args
+                .into_iter()
+                .map(|a| {
+                    let file = std::path::Path::new(&a).exists();
+                    let path = if file { std::fs::canonicalize(&a).map(|p| p.to_string_lossy().into_owned()).unwrap_or(a) } else { a };
+                    (path, !file)
+                })
+                .collect();
+            self.accept(sources);
         }
-        Icon::Next => {
-            painter.rect_filled(Rect::from_center_size(Pos2::new(c.x + 6.0, c.y), Vec2::new(2.0, 10.0)), 0.0, ink);
-            painter.add(tri(vec![Pos2::new(c.x - 6.0, c.y - 5.0), Pos2::new(c.x + 4.0, c.y), Pos2::new(c.x - 6.0, c.y + 5.0)]));
+        if std::env::var_os("RMP_SPIKE_NO_UPDATE_CHECK").is_none() {
+            self.update_rx = Some((updates::check(), false)); // checkMacUpdates(NO)
         }
-        Icon::Stop => {
-            painter.rect_filled(Rect::from_center_size(c, Vec2::splat(9.0)), 0.0, ink);
+        let _ = ctx;
+    }
+
+    fn poll_background(&mut self) {
+        if let Some((rx, explicit)) = &self.update_rx {
+            if let Ok(outcome) = rx.try_recv() {
+                let explicit = *explicit;
+                self.update_rx = None;
+                match outcome {
+                    updates::Outcome::Available { version, notes, .. } => {
+                        self.dialogs.push(dialogs::Dialog::UpdateOffer { version, notes });
+                    }
+                    updates::Outcome::UpToDate { current } if explicit => {
+                        self.note("RMP is up to date", format!("You are running RMP {current}."));
+                    }
+                    updates::Outcome::Failed { reason } if explicit => {
+                        self.note("Could not check for updates", reason);
+                    }
+                    _ => {}
+                }
+            }
         }
-        Icon::Fullscreen => {
-            let r = Rect::from_center_size(c, Vec2::splat(11.0));
-            let st = Stroke::new(1.0, ink);
-            let l = 3.0;
-            for (corner, dx, dy) in [
-                (r.left_top(), 1.0, 1.0),
-                (r.right_top(), -1.0, 1.0),
-                (r.left_bottom(), 1.0, -1.0),
-                (r.right_bottom(), -1.0, -1.0),
-            ] {
-                painter.line_segment([corner, corner + Vec2::new(dx * l, 0.0)], st);
-                painter.line_segment([corner, corner + Vec2::new(0.0, dy * l)], st);
+        if let Some(rx) = &self.folder_rx {
+            if let Ok(files) = rx.try_recv() {
+                self.folder_rx = None;
+                if files.is_empty() {
+                    self.note("Open Folder", "No supported media files were found in this folder.");
+                } else {
+                    self.accept(files.into_iter().map(|f| (f, false)).collect());
+                }
+            }
+        }
+        if let Some(rx) = &self.capture_rx {
+            if let Ok((granted, source)) = rx.try_recv() {
+                self.capture_rx = None;
+                if granted {
+                    self.open_location(&source);
+                } else {
+                    self.note("Capture Device", "Allow camera or microphone access for RMP in System Settings to use this device.");
+                }
             }
         }
     }
-}
 
-struct BtnSpec<'a> {
-    caption: &'a str,
-    size: f32,
-    icon: Option<Icon>,
-    width: f32,
-    /// `Open Files…` in the top row; XP draws it without the silver treatment.
-    open: bool,
-}
-
-/// Transport button drawn like TransportButton in ui.m, per skin.
-fn tbutton(ui: &mut egui::Ui, skin: Skin, th: &Theme, spec: BtnSpec) -> egui::Response {
-    // The Mac skin captions every button with its title, so buttons size to their text (ui.m intrinsicContentSize).
-    let width = if skin == Skin::Mac && spec.icon.is_none() {
-        text_width(ui, spec.caption, spec.size) + 16.0
-    } else {
-        spec.width
-    };
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, BUTTON_H), Sense::click());
-    let painter = ui.painter();
-    let pressed = resp.is_pointer_button_down_on();
-    let is_play = spec.icon == Some(Icon::Play) || spec.icon == Some(Icon::Pause);
-    let mut ink = th.text;
-    let r = rect.shrink2(Vec2::new(1.5, 2.0));
-    let silver = skin == Skin::Xp && !spec.open;
-    let orb = skin == Skin::Seven && is_play;
-    let round = silver || orb;
-    let shape = if round {
-        let d = r.width().min(r.height());
-        Rect::from_center_size(r.center(), Vec2::splat(d))
-    } else {
-        r
-    };
-    let radius = if round { shape.height() / 2.0 } else { th.radius };
-    let face = if skin == Skin::RmpDefault && is_play { th.accent } else { th.face };
-    let edge = if skin == Skin::RmpDefault && is_play { rgb(0xdd6238) } else { th.edge };
-    let clip = painter.with_clip_rect(shape);
-    if orb {
-        painter.circle_filled(shape.center(), radius, if pressed { rgb(0x1953ae) } else { rgb(0x2585df) });
-        ink = Color32::WHITE;
-    } else if silver {
-        painter.circle_filled(shape.center(), radius, rgb(if pressed { 0x9daec7 } else { 0xe1eaf7 }));
-    } else if skin == Skin::Seven {
-        let top = if pressed { edge } else { face };
-        vgradient(&clip, shape, &[(0.0, top), (0.5, face), (1.0, th.highlight)]);
-    } else {
-        painter.rect_filled(shape, radius, if pressed { edge } else { face });
-    }
-    if skin == Skin::RmpDefault && is_play {
-        ink = rgb(0x16191f);
-    }
-    if round {
-        painter.circle_stroke(shape.center(), radius, Stroke::new(1.0, edge));
-    } else if skin != Skin::Modern {
-        painter.rect_stroke(shape, radius, Stroke::new(1.0, edge), egui::StrokeKind::Inside);
-    }
-    if skin == Skin::Xp && !silver && !pressed {
-        painter.rect_stroke(shape.shrink(1.0), 2.0, Stroke::new(1.0, Color32::WHITE), egui::StrokeKind::Inside);
-    }
-    match spec.icon {
-        Some(icon) if skin != Skin::Mac => draw_icon(painter, shape.center(), icon, ink),
-        _ => {
-            let font = FontId::new(spec.size, FontFamily::Proportional);
-            painter.text(shape.center(), egui::Align2::CENTER_CENTER, spec.caption, font, ink);
-        }
-    }
-    resp.on_hover_text(spec.caption)
-}
-
-fn text_width(ui: &egui::Ui, caption: &str, size: f32) -> f32 {
-    ui.painter()
-        .layout_no_wrap(caption.into(), FontId::new(size, FontFamily::Proportional), Color32::BLACK)
-        .size()
-        .x
-}
-
-/// Seek or volume bar in the NSSlider style: a thin rail filled in the accent colour, with a round knob.
-/// Returns (fraction while dragging or clicking, whether it was released).
-fn bar(ui: &mut egui::Ui, frac: f64, enabled: bool, width: f32, th: &Theme) -> (Option<f64>, bool) {
-    let sense = if enabled { Sense::click_and_drag() } else { Sense::hover() };
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, TIMELINE_H), sense);
-    let track = Rect::from_min_max(
-        Pos2::new(rect.left() + 8.0, rect.center().y - 2.0),
-        Pos2::new(rect.right() - 8.0, rect.center().y + 2.0),
-    );
-    let painter = ui.painter();
-    let rail = if th.dark { rgb(0x555555) } else { rgb(0xd0d0d0) };
-    painter.rect_filled(track, 2.0, rail);
-    let x = track.left() + track.width() * frac as f32;
-    painter.rect_filled(Rect::from_min_max(track.min, Pos2::new(x, track.max.y)), 2.0, th.accent);
-    painter.circle(Pos2::new(x, rect.center().y), 8.0, if th.dark { rgb(0xdddddd) } else { Color32::WHITE }, Stroke::new(1.0, rgb(0x9a9a9a)));
-    if !enabled {
-        return (None, false);
-    }
-    let pointer = if resp.dragged() || resp.clicked() || resp.drag_stopped() {
-        resp.interact_pointer_pos().map(|p| ((p.x - track.left()) / track.width()).clamp(0.0, 1.0) as f64)
-    } else {
-        None
-    };
-    (pointer, resp.drag_stopped() || resp.clicked())
-}
-
-/// VLC skin volume: a green wedge rising to the right (VolumeSlider.wedge in ui.m).
-fn wedge(ui: &mut egui::Ui, value: &mut i32) -> bool {
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(VOLUME_W, TIMELINE_H), Sense::click_and_drag());
-    let mut changed = false;
-    let r = rect.shrink2(Vec2::new(4.0, 2.0));
-    if resp.dragged() || resp.clicked() {
-        if let Some(pos) = resp.interact_pointer_pos() {
-            let v = ((pos.x - r.left()) / r.width() * 100.0).round().clamp(0.0, 100.0) as i32;
-            if v != *value {
-                *value = v;
-                changed = true;
-            }
-        }
-    }
-    let tri = vec![Pos2::new(r.left(), r.bottom()), Pos2::new(r.right(), r.top()), Pos2::new(r.right(), r.bottom())];
-    let painter = ui.painter();
-    painter.add(Shape::convex_polygon(tri.clone(), rgb(0xe2e2e2), Stroke::new(1.0, rgb(0x777777))));
-    let fill_w = r.width() * *value as f32 / 100.0;
-    let clip = painter.with_clip_rect(Rect::from_min_size(r.min, Vec2::new(fill_w, r.height())));
-    clip.add(Shape::convex_polygon(tri, rgb(0x4bc23b), Stroke::NONE));
-    changed
-}
-
-impl eframe::App for App {
-    /// Fully clear so the video layered beneath shows through the screen rect unchanged.
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        [0.0; 4]
-    }
-
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-        if self.player.is_null() {
-            self.attach_video(frame);
-            if let Some(path) = std::env::args_os().nth(1) {
-                self.open_path(PathBuf::from(path));
-            }
-        }
-        if self.logo.is_none() {
-            if let Ok(img) = image::load_from_memory(LOGO_PNG) {
-                let img = img.to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-                self.logo = Some(ctx.load_texture("rmp-logo", color, egui::TextureOptions::LINEAR));
-            }
-        }
-        if self.cone.is_none() {
-            if let Ok(img) = image::load_from_memory(CONE_PNG) {
-                let img = img.to_rgba8();
-                let size = [img.width() as usize, img.height() as usize];
-                let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-                self.cone = Some(ctx.load_texture("vlc-cone", color, egui::TextureOptions::LINEAR));
-            }
-        }
-        if let Some(title) = self.title_cmd.take() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
-        }
-        self.apply_chrome(frame, &ctx);
-        ctx.request_repaint_after(std::time::Duration::from_millis(200));
-
-        if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
-            self.toggle();
-        }
-        // Keyboard shortcuts from installPlayerMenus (mac-menus.h). Modifiers are read from each key event:
-        // the frame's modifier state can lag behind the key, which dropped Command shortcuts.
+    /// Keyboard equivalents from the menus. Modifiers come from each key event: the frame's
+    /// modifier state can lag the key on macOS, which dropped Command shortcuts.
+    fn shortcuts(&mut self, ctx: &egui::Context) {
         let presses: Vec<(egui::Key, bool, bool, bool)> = ctx.input(|i| {
             i.events
                 .iter()
                 .filter_map(|e| match e {
-                    egui::Event::Key { key, pressed: true, modifiers, .. } => {
-                        Some((*key, modifiers.shift, modifiers.command, modifiers.ctrl))
-                    }
+                    egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, modifiers.shift, modifiers.command, modifiers.ctrl)),
                     _ => None,
                 })
                 .collect()
         });
-        let hit = |key: egui::Key, shift: bool, cmd: bool, ctrl: bool| {
-            presses.iter().any(|p| p.0 == key && p.1 == shift && p.2 == cmd && p.3 == ctrl)
-        };
-        if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
-            open_link(LINK_TARGET);
+        let hit = |key: egui::Key, shift: bool, cmd: bool, ctrl: bool| presses.iter().any(|p| p.0 == key && p.1 == shift && p.2 == cmd && p.3 == ctrl);
+        if hit(egui::Key::F1, false, false, false) {
+            appkit::open_url(LINK_TARGET);
         }
         let typing = ctx.memory(|m| m.focused().is_some());
-        if !typing {
-            if hit(egui::Key::O, false, true, false) {
-                self.open_dialog(false);
-            } else if hit(egui::Key::O, true, true, false) {
-                self.open_dialog(true);
-            } else if hit(egui::Key::U, false, true, false) {
-                self.note_or_prompt(Native::OpenStream);
-            } else if hit(egui::Key::T, false, true, false) {
-                self.note_or_prompt(Native::TimeJump);
-            } else if hit(egui::Key::E, false, true, false) {
-                let r = menus::engine_action(self, "effects", "");
-                if !r.is_empty() {
-                    self.note = Some(("Effects and Filters".into(), r));
-                }
-            } else if hit(egui::Key::L, false, true, false) {
-                self.show_queue = !self.show_queue;
-            } else if hit(egui::Key::F, false, true, true) {
-                self.run_native(Native::Fullscreen, &ctx);
-            } else if hit(egui::Key::Q, false, true, false) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else if hit(egui::Key::OpenBracket, false, false, false) {
-                self.step(-1);
-            } else if hit(egui::Key::CloseBracket, false, false, false) {
-                self.step(1);
-            }
+        if hit(egui::Key::Q, false, true, false) {
+            self.quit_requested = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
         }
+        if typing || !self.dialogs.is_empty() {
+            return;
+        }
+        use menus::{Action, Picked};
+        let mut run: Option<Picked> = None;
+        if hit(egui::Key::Space, false, false, false) {
+            run = Some(Picked::Action(Action::PlayPause));
+        } else if hit(egui::Key::O, false, true, false) {
+            run = Some(Picked::Action(Action::OpenSingle));
+        } else if hit(egui::Key::O, true, true, false) {
+            run = Some(Picked::Action(Action::OpenMultiple));
+        } else if hit(egui::Key::U, false, true, false) {
+            run = Some(Picked::Action(Action::OpenStream));
+        } else if hit(egui::Key::T, false, true, false) {
+            if self.menu_enabled("time") {
+                run = Some(Picked::Command { key: "time", value: String::new(), title: "Jump to Specific Time…".into() });
+            }
+        } else if hit(egui::Key::E, false, true, false) {
+            run = Some(Picked::Command { key: "effects", value: String::new(), title: "Effects and Filters…".into() });
+        } else if hit(egui::Key::L, false, true, false) {
+            run = Some(Picked::Command { key: "playlist", value: String::new(), title: "Playlist".into() });
+        } else if hit(egui::Key::F, false, true, true) {
+            run = Some(Picked::Action(Action::Fullscreen));
+        } else if hit(egui::Key::OpenBracket, false, false, false) {
+            run = Some(Picked::Action(Action::Previous));
+        } else if hit(egui::Key::CloseBracket, false, false, false) {
+            run = Some(Picked::Action(Action::Next));
+        } else if self.wallpaper.is_some() && hit(egui::Key::Escape, false, false, false) {
+            self.toggle_wallpaper();
+        }
+        if let Some(p) = run {
+            self.run_picked(p, ctx);
+        }
+    }
+}
 
-        let skin = self.skin;
-        let th = skin.theme();
-        let state = self.state();
-        if state != self.last_state {
-            self.last_state = state;
-            self.status = ["Ready", "Opening…", "Buffering…", "Playing", "Paused", "Stopped", "Finished", "Playback error"]
-                .get(state.clamp(0, 7) as usize)
-                .unwrap_or(&"Ready")
-                .to_string();
-        }
+/// arc4random_uniform stand-in for shuffle.
+fn random_below(n: usize) -> usize {
+    if n == 0 {
+        return 0;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let mut x = (nanos as u64) ^ 0x9E37_79B9_7F4A_7C15;
+    x ^= x >> 33;
+    x = x.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    x ^= x >> 33;
+    (x % n as u64) as usize
+}
 
-        // Fullscreen hides the menu bar and the bars (mac-fullscreen.h). Mouse movement shows the transport.
-        let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        if self.presentation_fullscreen != Some(fullscreen) {
-            self.presentation_fullscreen = Some(fullscreen);
-            set_presentation(fullscreen);
-        }
-        if ctx.input(|i| i.pointer.delta() != Vec2::ZERO) || (fullscreen && !self.was_fullscreen) {
-            self.last_motion = std::time::Instant::now();
-        }
-        self.was_fullscreen = fullscreen;
-        let bare = fullscreen || skin == Skin::Linux; // arrangeChrome: bare = inFull || terminal
-        // egui cannot see the pointer above its content, and the titlebar sits there, so the top-edge
-        // check reads the global mouse position from AppKit.
-        let pointer_at_top = fullscreen && pointer_near_screen_top();
-        let show_float = fullscreen && skin != Skin::Linux
-            && (self.last_motion.elapsed().as_secs_f32() < FLOAT_HIDE_SECS || ctx.any_popup_open());
+impl eframe::App for App {
+    /// Fully clear, so the video layered beneath shows through the screen rectangle unchanged.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        [0.0; 4]
+    }
 
-        // Menu bar (installPlayerMenus). Actions are collected and run after the bar is drawn.
-        let mut picked: Vec<Native> = Vec::new();
-        let mut notes: Vec<(String, String)> = Vec::new();
-        if skin != Skin::Linux && (!fullscreen || pointer_at_top) {
-            egui::Panel::top("menubar").show(ui, |ui| {
-                egui::MenuBar::new().ui(ui, |ui| {
-                    for (title, entries) in menus::menu_bar() {
-                        ui.menu_button(title, |ui| menus::render(ui, self, &entries, &mut picked, &mut notes));
-                    }
-                });
-            });
-        }
-        for (title, text) in notes {
-            self.note = Some((title, text));
-        }
-        for action in picked {
-            if action == Native::ClearRecent {
-                self.clear_recent();
-            } else {
-                self.run_native(action, &ctx);
-            }
-        }
-        self.draw_dialogs(&ctx);
-
-        let full = ui.available_rect_before_wrap();
-        let (w, h) = (full.width(), full.height());
-        // Everything below is laid out relative to `full`, which starts under the menu bar.
-        let origin = full.min.to_vec2();
-        let ink = match skin {
-            Skin::Xp => Color32::WHITE,
-            Skin::Modern => rgb(0x181818),
-            _ => th.text,
-        };
-
-        // The XP and Windows 7 layouts have a media header and sidebar instead of the top row.
-        let media = matches!(skin, Skin::Xp | Skin::Seven) && !bare;
-        let media_video = !media || self.media_page == MediaPage::NowPlaying;
-        let has_top = skin != Skin::Vlc && !bare && !media;
-        let bottom_top = h - BUTTON_H - BOTTOM_INSET;
-        let timeline_top = bottom_top - 6.0 - TIMELINE_H;
-
-        let mut screen_top = 0.0;
-        if has_top {
-            screen_top = 10.0 + BUTTON_H + 10.0;
-        }
-        if media {
-            screen_top = MEDIA_HEADER_H;
-        }
-        let screen_left = if media { MEDIA_SIDEBAR_W } else { 0.0 };
-
-        // Screen: black, with the cone in the VLC skin while idle (ui.m `cone`).
-        let screen = if bare {
-            full
-        } else {
-            Rect::from_min_max(Pos2::new(screen_left, screen_top), Pos2::new(w, timeline_top - 6.0)).translate(origin)
-        };
-        // Panel backgrounds cover everything except the video screen, which stays clear so the video
-        // layered beneath egui shows through.
-        let above = Rect::from_min_max(full.min, Pos2::new(full.right(), screen.top()));
-        let below = Rect::from_min_max(Pos2::new(full.left(), screen.bottom()), full.max);
-        let mut regions = vec![above, below];
-        if media {
-            // The sidebar, and the content area when it is not showing video, are panel-coloured too.
-            regions.push(Rect::from_min_max(
-                Pos2::new(full.left(), screen.top()),
-                Pos2::new(full.left() + MEDIA_SIDEBAR_W, screen.bottom()),
-            ));
-            if !media_video {
-                regions.push(screen);
-            }
-        }
-        for region in regions {
-            if region.height() <= 0.0 {
-                continue;
-            }
-            let p = ui.painter().with_clip_rect(region);
-            p.rect_filled(region, 0.0, th.panel);
-            if skin == Skin::Seven {
-                vgradient(&p, full, &[(0.0, th.panel), (0.33, rgb(0xf2faff)), (0.66, rgb(0xa2c6e3)), (1.0, th.panel)]);
-            }
-            if skin == Skin::Modern {
-                // ThemeSurface: a light 58 pt header over the dark panel.
-                p.rect_filled(Rect::from_min_size(full.min, Vec2::new(w, 58.0)), 0.0, rgb(0xf5f5f5));
-            }
-            if skin == Skin::Xp {
-                vgradient(
-                    &p,
-                    Rect::from_min_size(full.min, Vec2::new(w, 84.0)),
-                    &[(0.0, rgb(0x7588b0)), (0.33, rgb(0xe1e7f1)), (0.66, rgb(0xfbfcff)), (1.0, rgb(0x869ac4))],
-                );
-                vgradient(
-                    &p,
-                    Rect::from_min_size(full.min, Vec2::new(w, 58.0)),
-                    &[(0.0, rgb(0x1244b5)), (0.33, rgb(0x1260e9)), (0.66, rgb(0x0058e5)), (1.0, rgb(0x4796ff))],
-                );
-            }
-        }
-        let idle = match self.player() {
-            Some(p) => (unsafe { engine::ap_index(p) }) < 0,
-            None => true,
-        };
-        // Top row (ui.m `top`): name, status, Open Files…. Hidden in the VLC skin.
-        if has_top {
-            let top_rect = Rect::from_min_max(Pos2::new(INSET, 10.0), Pos2::new(w - INSET, 10.0 + BUTTON_H)).translate(origin);
-            let mut row = ui.new_child(egui::UiBuilder::new().max_rect(top_rect));
-            row.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 10.0;
-                ui.add(egui::Label::new(egui::RichText::new("RMP").strong().size(18.0).color(ink)));
-                ui.add(egui::Label::new(egui::RichText::new(&self.status).size(12.0).color(ink)));
-                let open_w = text_width(ui, "Open Files…", 13.0) + 14.0;
-                let spacer = (top_rect.width() - open_w - 170.0).max(0.0);
-                ui.add_space(spacer);
-                if tbutton(ui, skin, &th, BtnSpec { caption: "Open Files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
-                    self.open_dialog(true);
-                }
-            });
-        }
-
-        if media {
-            self.draw_media_layout(ui, &ctx, &th, ink, full, timeline_top - 6.0);
-        }
-
-        // Black unless libvlc has a video output; that output draws into the layered view beneath egui.
-        let has_video = match self.player() {
-            Some(p) => unsafe { engine::ap_has_video(p) },
-            None => false,
-        };
-        let linux_black = skin == Skin::Linux && !(has_video && state <= 4); // idleBlack in ui.m
-        if media_video && (!has_video || linux_black) {
-            ui.painter().rect_filled(screen, 0.0, Color32::BLACK);
-        }
-        if media_video {
-        match skin {
-            Skin::Seven => {
-                ui.painter().rect_stroke(screen, 0.0, Stroke::new(2.0, rgb(0x829db5)), egui::StrokeKind::Inside);
-            }
-            Skin::Xp => {
-                ui.painter().rect_stroke(screen, 0.0, Stroke::new(4.0, rgb(0x1256ce)), egui::StrokeKind::Inside);
-            }
-            _ => {}
-        }
-        if idle && skin == Skin::Vlc {
-            if let Some(cone) = &self.cone {
-                egui::Image::new(cone).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(CONE_SIZE)));
-            }
-        }
-        // The VLC skin shows its cone when paused or stopped; other skins show the RMP logo. An idle
-        // screen in other skins shows the logo too (syncPausedMark in ui.m).
-        let paused_or_stopped = state == 4 || state == 5;
-        let mark = if skin == Skin::Vlc {
-            if paused_or_stopped && !idle { self.cone.as_ref() } else { None }
-        } else if paused_or_stopped || idle {
-            self.logo.as_ref()
-        } else {
-            None
-        };
-        if let Some(mark) = mark {
-            egui::Image::new(mark).paint_at(ui, Rect::from_center_size(screen.center(), Vec2::splat(MARK_SIZE)));
-        }
-        }
-        if let Some(view) = &self.video_view {
-            view.setHidden(idle || !media_video);
-        }
-        if media_video {
-            self.place_video(screen);
-        }
-
-        // The timeline and transport rows are hidden in bare layouts (fullscreen and Linux).
-        if !bare {
-        // Timeline row (ui.m `timeline`): seek bar + clock.
-        let timeline_rect = Rect::from_min_max(Pos2::new(INSET, timeline_top), Pos2::new(w - INSET, timeline_top + TIMELINE_H)).translate(origin);
-        let (t, d, seekable) = match self.player() {
-            Some(p) => unsafe { (engine::ap_time(p), engine::ap_length(p), engine::ap_seekable(p)) },
-            None => (0, 0, false),
-        };
-        let mut timeline = ui.new_child(egui::UiBuilder::new().max_rect(timeline_rect));
-        timeline.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = ROW_GAP;
-            let bar_w = (timeline_rect.width() - CLOCK_W - ROW_GAP).max(40.0);
-            let mut frac = if d > 0 { (self.scrub.unwrap_or(t) as f64 / d as f64).clamp(0.0, 1.0) } else { 0.0 };
-            let (pointer, released) = bar(ui, frac, seekable && d > 0, bar_w, &th);
-            if let Some(f) = pointer {
-                frac = f;
-                self.scrub = Some((frac * d as f64) as i64);
-            }
-            if released {
-                let target = (frac * d as f64) as i64;
-                self.scrub = None;
-                if let Some(p) = self.player() {
-                    unsafe { engine::ap_seek(p, target) };
-                }
-            }
-            let shown = self.scrub.unwrap_or(t);
-            let clock = format!("{} / {}", stamp(shown), if d > 0 { stamp(d) } else { "—".into() });
-            ui.add_sized(
-                Vec2::new(CLOCK_W, TIMELINE_H),
-                egui::Label::new(egui::RichText::new(clock).font(FontId::new(12.0, FontFamily::Monospace)).color(th.text)),
-            );
-        });
-
-        // Bottom transport row (ui.m `bottom`), ordered per skin.
-        let bottom_rect = Rect::from_min_max(Pos2::new(INSET, bottom_top), Pos2::new(w - INSET, bottom_top + BUTTON_H)).translate(origin);
-        let mut bottom = ui.new_child(egui::UiBuilder::new().max_rect(bottom_rect));
-        let mut vol = self.volume;
-        let mut volume_changed = false;
-        let mut actions: Vec<Item> = Vec::new();
-        bottom.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = if skin == Skin::Seven { 2.0 } else { ROW_GAP };
-            let items = bottom_items(skin);
-            for item in items {
-                match item {
-                    Item::Play => {
-                        let icon = if state == 3 || state == 2 || state == 1 { Icon::Pause } else { Icon::Play };
-                        let caption = if icon == Icon::Pause { "Pause" } else { "Play" };
-                        let resp = tbutton(ui, skin, &th, BtnSpec { caption, size: 17.0, icon: Some(icon), width: 52.0, open: false });
-                        if resp.clicked() {
-                            actions.push(Item::Play);
-                        }
-                    }
-                    Item::Prev => {
-                        let resp = tbutton(ui, skin, &th, BtnSpec { caption: "Previous", size: 13.0, icon: Some(Icon::Prev), width: 68.0, open: false });
-                        if resp.clicked() {
-                            actions.push(Item::Prev);
-                        }
-                    }
-                    Item::Stop => {
-                        let resp = tbutton(ui, skin, &th, BtnSpec { caption: "Stop", size: 13.0, icon: Some(Icon::Stop), width: 29.0, open: false });
-                        if resp.clicked() {
-                            actions.push(Item::Stop);
-                        }
-                    }
-                    Item::Next => {
-                        let resp = tbutton(ui, skin, &th, BtnSpec { caption: "Next", size: 13.0, icon: Some(Icon::Next), width: 44.0, open: false });
-                        if resp.clicked() {
-                            actions.push(Item::Next);
-                        }
-                    }
-                    Item::Fullscreen => {
-                        let resp = tbutton(ui, skin, &th, BtnSpec { caption: "Fullscreen", size: 13.0, icon: Some(Icon::Fullscreen), width: 26.0, open: false });
-                        if resp.clicked() {
-                            actions.push(Item::Fullscreen);
-                        }
-                    }
-                    Item::Queue => {
-                        let caption = "Queue";
-                        let width = text_width(ui, caption, 13.0) + 14.0;
-                        if tbutton(ui, skin, &th, BtnSpec { caption, size: 13.0, icon: None, width, open: false }).clicked() {
-                            self.show_queue = !self.show_queue;
-                        }
-                    }
-                    Item::Repeat | Item::Shuffle => {
-                        let caption = if item == Item::Repeat { "↻" } else { "⤨" };
-                        let width = text_width(ui, caption, 13.0) + 14.0;
-                        let _ = tbutton(ui, skin, &th, BtnSpec { caption, size: 13.0, icon: None, width, open: false });
-                    }
-                    Item::Spacer => {
-                        let used = ui.min_rect().width();
-                        let right = bottom_rect.width() - (VOLUME_W + 60.0);
-                        if right > used {
-                            ui.add_space(right - used);
-                        }
-                    }
-                    Item::VolumeLabel => {
-                        ui.add(egui::Label::new(egui::RichText::new("Volume").size(12.0).color(th.text)));
-                    }
-                    Item::Volume => {
-                        if skin == Skin::Vlc {
-                            volume_changed = wedge(ui, &mut vol);
-                        } else {
-                            let frac = vol as f64 / 100.0;
-                            let (pointer, _) = bar(ui, frac, true, VOLUME_W, &th);
-                            if let Some(f) = pointer {
-                                vol = (f * 100.0).round() as i32;
-                                volume_changed = true;
-                            }
-                        }
+    /// Edit → Cut/Copy/Paste/Select All become the matching egui events for the focused text field.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Some(action) = self.pending_edit.take() {
+            use menus::Action;
+            match action {
+                Action::Cut => raw.events.push(egui::Event::Cut),
+                Action::Copy => raw.events.push(egui::Event::Copy),
+                Action::Paste => {
+                    if let Some(text) = appkit::pasteboard_location() {
+                        raw.events.push(egui::Event::Paste(text));
                     }
                 }
-            }
-        });
-        if volume_changed {
-            self.set_volume(vol);
-        }
-        for item in actions {
-            match item {
-                Item::Play => self.toggle(),
-                Item::Prev => self.step(-1),
-                Item::Next => self.step(1),
-                Item::Stop => {
-                    if let Some(p) = self.player() {
-                        unsafe { engine::ap_stop(p) };
-                    }
-                }
-                Item::Fullscreen => {
-                    let fs = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fs));
-                }
+                Action::SelectAll => raw.events.push(egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::COMMAND,
+                }),
                 _ => {}
             }
         }
-        }
-
-        self.draw_settings_dialog(&ctx);
-        self.draw_queue_window(&ctx);
-        if self.settings.status_bar {
-            egui::Panel::bottom("status").show(ui, |ui| {
-                let clock = match self.player() {
-                    Some(p) => {
-                        let (t, d) = unsafe { (engine::ap_time(p), engine::ap_length(p)) };
-                        format!("{} / {}", stamp(t), if d > 0 { stamp(d) } else { "—".into() })
-                    }
-                    None => "0:00 / —".into(),
-                };
-                ui.label(format!("{}   {}", self.status, clock));
-            });
-        }
-        if show_float {
-            self.draw_floating_transport(ui, &th, state);
-        }
-        if skin == Skin::Linux && !self.term.hidden {
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("rmp-terminal"),
-                egui::ViewportBuilder::default()
-                    .with_title("RMP Terminal")
-                    .with_inner_size([650.0, 300.0])
-                    .with_min_inner_size([400.0, 180.0]),
-                |ctx, _class| self.terminal_ui(ctx),
-            );
-        }
-    }
-}
-
-impl App {
-    fn note_or_prompt(&mut self, action: Native) {
-        match action {
-            Native::OpenStream => self.prompt = Some(Prompt::Stream(String::new())),
-            Native::TimeJump => self.prompt = Some(Prompt::Time(String::new())),
-            _ => {}
-        }
     }
 
-    /// Names of the library items (file names, as the shipping library shows them).
-    fn library_names(&mut self) -> Vec<String> {
-        let Some(p) = self.player() else { return Vec::new() };
-        let count = unsafe { engine::ap_library_count(p) };
-        (0..count)
-            .map(|i| {
-                let raw = unsafe { engine::ap_library_item(p, i) };
-                if raw.is_null() {
-                    return String::new();
-                }
-                let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
-                path.rsplit('/').next().unwrap_or(&path).to_string()
-            })
-            .collect()
-    }
-
-    /// The XP and Windows 7 media layout (mac-library.h): header with title, search and Open files,
-    /// a sidebar with the pages and playlist buttons, and the page content.
-    fn draw_media_layout(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, th: &Theme, ink: Color32, full: Rect, media_bottom: f32) {
-        let header = Rect::from_min_size(full.min, Vec2::new(full.width(), MEDIA_HEADER_H));
-        let bottom = full.min.y + media_bottom;
-        let sidebar = Rect::from_min_max(
-            Pos2::new(full.left(), header.bottom()),
-            Pos2::new(full.left() + MEDIA_SIDEBAR_W, bottom),
-        );
-        let content = Rect::from_min_max(Pos2::new(full.left() + MEDIA_SIDEBAR_W, header.bottom()), Pos2::new(full.right(), bottom));
-
-        // Header: title on the left; search and Open files… on the right.
-        let mut head = ui.new_child(egui::UiBuilder::new().max_rect(header.shrink2(Vec2::new(16.0, 14.0))));
-        let open_w = text_width(&head, "Open files…", 13.0) + 14.0;
-        let mut open_clicked = false;
-        head.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 8.0;
-            ui.add(egui::Label::new(egui::RichText::new("Media Library").strong().size(15.0).color(ink)));
-            let search_w = 170.0;
-            let spacer = (header.width() - 32.0 - 150.0 - open_w - search_w - 8.0).max(0.0);
-            ui.add_space(spacer);
-            ui.add(egui::TextEdit::singleline(&mut self.library_search).hint_text("Search").desired_width(search_w));
-            if tbutton(ui, self.skin, th, BtnSpec { caption: "Open files…", size: 13.0, icon: None, width: open_w, open: true }).clicked() {
-                open_clicked = true;
-            }
-        });
-        if open_clicked {
-            self.open_dialog(true);
-        }
-
-        // Sidebar: the three pages, then the playlist buttons.
-        let mut side_actions: Vec<Native> = Vec::new();
-        let mut side = ui.new_child(egui::UiBuilder::new().max_rect(sidebar.shrink2(Vec2::new(8.0, 12.0))));
-        side.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 6.0;
-            for (label, page) in [
-                ("Now Playing", MediaPage::NowPlaying),
-                ("Library", MediaPage::Library),
-                ("Current Playlist", MediaPage::Playlist),
-            ] {
-                if ui.selectable_label(self.media_page == page, label).clicked() {
-                    self.media_page = page;
-                }
-            }
-            ui.add_space(14.0);
-            if ui.add(egui::Button::new("Open playlist…").frame(false)).clicked() {
-                side_actions.push(Native::OpenPlaylist);
-            }
-            if ui.add(egui::Button::new("Save playlist…").frame(false)).clicked() {
-                side_actions.push(Native::SavePlaylist);
-            }
-        });
-        for action in side_actions {
-            self.run_native(action, ctx);
-        }
-
-        // Content: Now Playing shows the video screen (drawn by the caller); the other pages draw here.
-        let mut body = ui.new_child(egui::UiBuilder::new().max_rect(content.shrink(12.0)));
-        match self.media_page {
-            MediaPage::NowPlaying => {}
-            MediaPage::Library => self.draw_library(&mut body, th),
-            MediaPage::Playlist => self.draw_playlist(&mut body),
-        }
-    }
-
-    /// The library table: Title, Album, Artist, Length, with search. Double-click plays the item.
-    /// Album, artist and length need the engine's metadata, which the spike does not read yet.
-    fn draw_library(&mut self, ui: &mut egui::Ui, th: &Theme) {
-        let query = self.library_search.trim().to_lowercase();
-        let rows: Vec<(usize, String)> = self
-            .library_names()
-            .into_iter()
-            .enumerate()
-            .filter(|(_, name)| query.is_empty() || name.to_lowercase().contains(&query))
-            .collect();
-        let width = ui.available_width();
-        let fractions = [0.5f32, 0.2, 0.2, 0.1];
-        let names = ["Title", "Album", "Artist", "Length"];
-        ui.label(egui::RichText::new("All media").strong().size(13.0).color(th.text));
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            for (name, frac) in names.iter().zip(fractions) {
-                ui.add_sized(
-                    [width * frac, 20.0],
-                    egui::Label::new(egui::RichText::new(*name).size(12.0).strong().color(th.text)),
-                );
-            }
-        });
-        let mut play: Option<usize> = None;
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show_rows(ui, 22.0, rows.len(), |ui, range| {
-            for row in range {
-                let (index, name) = &rows[row];
-                let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::click());
-                if resp.hovered() {
-                    ui.painter().rect_filled(rect, 0.0, th.accent.gamma_multiply(0.25));
-                }
-                let mut x = rect.left();
-                for (i, frac) in fractions.iter().enumerate() {
-                    let text = if i == 0 { name.as_str() } else { "" };
-                    let cell = Rect::from_min_size(Pos2::new(x + 4.0, rect.top()), Vec2::new(width * frac - 8.0, rect.height()));
-                    ui.painter().text(
-                        cell.left_center(),
-                        egui::Align2::LEFT_CENTER,
-                        text,
-                        FontId::new(12.0, FontFamily::Proportional),
-                        th.text,
-                    );
-                    x += width * frac;
-                }
-                if resp.double_clicked() {
-                    play = Some(*index);
-                }
-            }
-        });
-        if let Some(i) = play {
-            if let Some(p) = self.player() {
-                unsafe { engine::ap_library_play(p, i) };
-            }
-        }
-    }
-
-    /// The current playlist as a page: clicking an item plays it.
-    fn draw_playlist(&mut self, ui: &mut egui::Ui) {
-        let items: Vec<String> = match self.player() {
-            Some(p) => {
-                let count = unsafe { engine::ap_count(p) };
-                (0..count)
-                    .map(|i| {
-                        let raw = unsafe { engine::ap_item(p, i) };
-                        if raw.is_null() {
-                            return String::new();
-                        }
-                        let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
-                        path.rsplit('/').next().unwrap_or(&path).to_string()
-                    })
-                    .collect()
-            }
-            None => Vec::new(),
-        };
-        let current = self.player().map(|p| unsafe { engine::ap_index(p) }).unwrap_or(-1);
-        let mut play: Option<usize> = None;
-        ui.label(egui::RichText::new("Current playlist").strong().size(13.0));
-        if items.is_empty() {
-            ui.label("The playlist is empty.");
-        }
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            for (i, name) in items.iter().enumerate() {
-                if ui.selectable_label(current == i as isize, format!("{}. {}", i + 1, name)).clicked() {
-                    play = Some(i);
-                }
-            }
-        });
-        if let Some(i) = play {
-            if let Some(p) = self.player() {
-                unsafe { engine::ap_play(p, i) };
-            }
-        }
-    }
-
-    /// The queue (Queue button, View → Playlist): lists the queued items; clicking one plays it.
-    fn draw_queue_window(&mut self, ctx: &egui::Context) {
-        if !self.show_queue {
-            return;
-        }
-        let items: Vec<String> = match self.player() {
-            Some(p) => {
-                let count = unsafe { engine::ap_count(p) };
-                (0..count)
-                    .map(|i| {
-                        let raw = unsafe { engine::ap_item(p, i) };
-                        if raw.is_null() {
-                            return String::new();
-                        }
-                        let path = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy().into_owned();
-                        path.rsplit('/').next().unwrap_or(&path).to_string()
-                    })
-                    .collect()
-            }
-            None => Vec::new(),
-        };
-        let current = self.player().map(|p| unsafe { engine::ap_index(p) }).unwrap_or(-1);
-        let mut play: Option<usize> = None;
-        let mut open = true;
-        egui::Window::new("Current Playlist").open(&mut open).default_width(260.0).show(ctx, |ui| {
-            if items.is_empty() {
-                ui.label("The playlist is empty.");
-            }
-            for (i, name) in items.iter().enumerate() {
-                let selected = current == i as isize;
-                if ui.selectable_label(selected, format!("{}. {}", i + 1, name)).clicked() {
-                    play = Some(i);
-                }
-            }
-        });
-        if !open {
-            self.show_queue = false;
-        }
-        if let Some(i) = play {
-            if let Some(p) = self.player() {
-                unsafe { engine::ap_play(p, i) };
-            }
-        }
-    }
-
-    /// Preferences / Customize Interface, laid out like the shipping NSAlert (configureView in mac-menus.h).
-    fn draw_settings_dialog(&mut self, ctx: &egui::Context) {
-        let Some(kind) = self.dialog.as_ref() else { return };
-        let preferences = matches!(kind, Dialog::Preferences);
-        let title = if preferences { "RMP Preferences" } else { "Customize Interface" };
-        let mut draft = self.settings;
-        let mut apply = false;
-        let mut cancel = false;
-        egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.checkbox(&mut draft.advanced, "Show advanced playback controls");
-            ui.checkbox(&mut draft.status_bar, "Show status bar");
-            ui.checkbox(&mut draft.dock_playlist, "Dock playlist in player");
-            if preferences {
-                ui.label("Startup volume");
-                ui.add(egui::Slider::new(&mut draft.startup_volume, 0..=100));
-            }
-            ui.horizontal(|ui| {
-                if ui.button("Apply").clicked() {
-                    apply = true;
-                }
-                if ui.button("Cancel").clicked() {
-                    cancel = true;
-                }
-            });
-        });
-        if apply {
-            self.settings = draft;
-            save_settings(&self.settings);
-            if preferences {
-                self.set_volume(draft.startup_volume);
-                self.volume = draft.startup_volume;
-            }
-            self.dialog = None;
-        } else if cancel {
-            self.dialog = None;
-        }
-    }
-
-    /// Note and prompt windows raised by menu items (menuNote / Open Network Stream… / Jump to Specific Time…).
-    fn draw_dialogs(&mut self, ctx: &egui::Context) {
-        let mut close_note = false;
-        if let Some((title, detail)) = &self.note {
-            egui::Window::new(title.clone()).collapsible(false).resizable(false).show(ctx, |ui| {
-                ui.label(detail.clone());
-                if ui.button("OK").clicked() {
-                    close_note = true;
-                }
-            });
-        }
-        if close_note {
-            self.note = None;
-        }
-        let mut submit: Option<Prompt> = None;
-        let mut cancel = false;
-        if let Some(prompt) = self.prompt.as_mut() {
-            let (title, hint, text) = match prompt {
-                Prompt::Stream(t) => ("Open Network Stream", "Enter a URL including its protocol, such as https://…", t),
-                Prompt::Time(t) => ("Jump to Specific Time", "Enter a time as m:ss or h:mm:ss.", t),
-            };
-            egui::Window::new(title).collapsible(false).resizable(false).show(ctx, |ui| {
-                ui.label(hint);
-                let edit = ui.text_edit_singleline(text);
-                ui.horizontal(|ui| {
-                    if ui.button("OK").clicked() || (edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
-                        submit = Some(match prompt_kind(&title) {
-                            true => Prompt::Stream(text.clone()),
-                            false => Prompt::Time(text.clone()),
-                        });
-                    }
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                });
-            });
-        }
-        if cancel {
-            self.prompt = None;
-        }
-        if let Some(prompt) = submit {
-            self.prompt = None;
-            match prompt {
-                Prompt::Stream(url) => {
-                    if url.trim().is_empty() {
-                        return;
-                    }
-                    self.open_location(url.trim());
-                }
-                Prompt::Time(text) => match parse_time(&text) {
-                    Some(ms) => {
-                        if let Some(p) = self.player() {
-                            unsafe { engine::ap_seek(p, ms) };
-                        }
-                    }
-                    None => self.note = Some(("Jump to Specific Time".into(), "Enter a valid playback time.".into())),
-                },
-            }
-        }
-    }
-}
-
-impl App {
-    /// Floating transport shown in fullscreen (showFloatingTransport in mac-fullscreen.h): seek bar,
-    /// Previous, Play/Pause, Next, volume, and Exit Full Screen.
-    fn draw_floating_transport(&mut self, ui: &mut egui::Ui, th: &Theme, state: i32) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        let (t, d, seekable) = match self.player() {
-            Some(p) => unsafe { (engine::ap_time(p), engine::ap_length(p), engine::ap_seekable(p)) },
-            None => (0, 0, false),
-        };
-        let mut seek_to: Option<i64> = None;
-        let mut actions: Vec<Item> = Vec::new();
-        let mut exit = false;
-        egui::Area::new(egui::Id::new("floating-transport"))
-            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -28.0))
-            .order(egui::Order::Foreground)
-            .show(&ctx, |ui| {
-                egui::Frame::new()
-                    .fill(Color32::from_black_alpha(190))
-                    .corner_radius(10.0)
-                    .inner_margin(egui::Margin::same(12))
-                    .show(ui, |ui| {
-                        ui.set_width(526.0);
-                        let frac = if d > 0 { (t as f64 / d as f64).clamp(0.0, 1.0) } else { 0.0 };
-                        let (pointer, released) = bar(ui, frac, seekable && d > 0, 500.0, th);
-                        if let Some(f) = pointer {
-                            if released {
-                                seek_to = Some((f * d as f64) as i64);
-                            }
-                        }
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = 8.0;
-                            let play_icon = if (1..=3).contains(&state) { Icon::Pause } else { Icon::Play };
-                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Previous", size: 13.0, icon: Some(Icon::Prev), width: 68.0, open: false }).clicked() {
-                                actions.push(Item::Prev);
-                            }
-                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Play", size: 17.0, icon: Some(play_icon), width: 52.0, open: false }).clicked() {
-                                actions.push(Item::Play);
-                            }
-                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Next", size: 13.0, icon: Some(Icon::Next), width: 44.0, open: false }).clicked() {
-                                actions.push(Item::Next);
-                            }
-                            let mut vol = self.volume;
-                            let (pointer, _) = bar(ui, vol as f64 / 100.0, true, 110.0, th);
-                            if let Some(f) = pointer {
-                                vol = (f * 100.0).round() as i32;
-                                self.set_volume(vol);
-                            }
-                            let exit_w = text_width(ui, "Exit Full Screen", 13.0) + 14.0;
-                            if tbutton(ui, Skin::Vlc, th, BtnSpec { caption: "Exit Full Screen", size: 13.0, icon: None, width: exit_w, open: false }).clicked() {
-                                exit = true;
-                            }
-                        });
-                    });
+        if !self.started {
+            self.start(&ctx, frame);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        if self.title != self.title_sent {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title.clone()));
+            self.title_sent = self.title.clone();
+        }
+        // Fullscreen state, and the presentation that hides the macOS menu bar while it lasts.
+        let full = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        if full != self.in_full {
+            self.in_full = full;
+            if full {
+                self.last_activity = Instant::now();
+                self.float_visible = self.skin != Skin::Linux;
+            }
+        }
+        if self.presentation_full != Some(full) {
+            self.presentation_full = Some(full);
+            appkit::set_presentation(full);
+        }
+        // Double-click on the screen toggles fullscreen (the NSEvent monitor in applicationDidFinishLaunching).
+        if ctx.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary)) && !ctx.egui_wants_pointer_input() {
+            if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                let g = layout::geometry(self, ctx.content_rect());
+                if g.screen_visible && g.screen.contains(pos) && self.has_engine() {
+                    self.full(&ctx);
+                }
+            }
+        }
+        // Wallpaper mode ends when the app is activated again (applicationShouldHandleReopen).
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            let active = objc2_app_kit::NSApplication::sharedApplication(mtm).isActive();
+            if active && !self.app_active && self.wallpaper.is_some() {
+                self.toggle_wallpaper();
+            }
+            self.app_active = active;
+        }
+        self.apply_chrome(&ctx);
+        self.poll_background();
+        self.refresh(&ctx);
+        self.shortcuts(&ctx);
+        self.run_script(&ctx);
+        layout::draw(self, ui, &ctx);
+        dialogs::draw(self, &ctx);
+        if self.skin == Skin::Linux && !self.term.hidden {
+            self.terminal_window(&ctx);
+        }
+        if self.playlist_shown && !self.store.undocked_playlist == false && self.regular() {
+            // undocked playlist panel: drawn by layout::playlist_panel
+        }
+        if self.in_full {
+            let on_panel = ctx.memory(|m| m.area_rect(egui::Id::new("floating-transport"))).is_some_and(|r| {
+                ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p))
             });
-        if let Some(ms) = seek_to {
-            if let Some(p) = self.player() {
-                unsafe { engine::ap_seek(p, ms) };
-            }
-        }
-        for item in actions {
-            match item {
-                Item::Play => self.toggle(),
-                Item::Prev => self.step(-1),
-                Item::Next => self.step(1),
-                _ => {}
-            }
-        }
-        if exit {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+            self.refresh_floating(on_panel);
         }
     }
 
-    /// The RMP Terminal window (mac-terminal.h): transcript, prompt, history, Tab completion.
-    fn terminal_ui(&mut self, ctx: &egui::Context) {
-        if ctx.input(|i| i.viewport().close_requested()) {
-            self.term.hidden = true;
-            return;
-        }
-        if !self.term.started {
-            self.term.started = true;
-            self.term.lines.push(("RMP Terminal\nType help to list commands.\n".into(), terminal::INK));
-            self.term.prompt = terminal::prompt(self.player as *mut c_void);
-        }
-        let player = self.player as *mut c_void;
-        egui::Area::new(egui::Id::new("terminal-root")).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
-            ui.set_min_size(ctx.content_rect().size());
-            egui::Frame::new().fill(terminal::BACKGROUND).inner_margin(egui::Margin::same(14)).show(ui, |ui| {
-                let height = (ui.available_height() - 30.0).max(40.0);
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .max_height(height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for (text, color) in &self.term.lines {
-                            ui.label(egui::RichText::new(text.trim_end_matches('\n')).monospace().size(13.0).color(*color));
-                        }
-                    });
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(self.term.prompt.clone()).monospace().size(13.0).color(terminal::PROMPT_INK));
-                    let edit = egui::TextEdit::singleline(&mut self.term.input)
-                        .font(FontId::monospace(13.0))
-                        .text_color(terminal::INK)
-                        .frame(egui::Frame::NONE)
-                        .desired_width(f32::INFINITY);
-                    let resp = ui.add(edit);
-                    resp.request_focus();
-                });
-                let (enter, tab, up, down) = ctx.input(|i| {
-                    (
-                        i.key_pressed(egui::Key::Enter),
-                        i.key_pressed(egui::Key::Tab),
-                        i.key_pressed(egui::Key::ArrowUp),
-                        i.key_pressed(egui::Key::ArrowDown),
-                    )
-                });
-                if enter {
-                    self.terminal_submit(ctx, player);
-                }
-                if tab && !self.term.input.is_empty() {
-                    let candidate = terminal::complete(player, &self.term.input);
-                    if !candidate.is_empty() {
-                        self.term.input = candidate;
-                    }
-                }
-                if up && self.term.history_index > 0 {
-                    if self.term.history_index == self.term.history.len() {
-                        self.term.draft = self.term.input.clone();
-                    }
-                    self.term.history_index -= 1;
-                    self.term.input = self.term.history[self.term.history_index].clone();
-                }
-                if down && self.term.history_index < self.term.history.len() {
-                    self.term.history_index += 1;
-                    self.term.input = if self.term.history_index == self.term.history.len() {
-                        self.term.draft.clone()
-                    } else {
-                        self.term.history[self.term.history_index].clone()
-                    };
-                }
-            });
-        });
+    fn on_exit(&mut self) {
+        appkit::set_presentation(false);
+        self.engine = None; // ap_destroy (applicationWillTerminate)
     }
-
-    /// Runs the typed line (submitTerminalLine in mac-terminal.h).
-    fn terminal_submit(&mut self, ctx: &egui::Context, player: *mut c_void) {
-        let line = std::mem::take(&mut self.term.input);
-        if line.is_empty() {
-            return;
-        }
-        if self.term.history.last() != Some(&line) {
-            self.term.history.push(line.clone());
-            if self.term.history.len() > 200 {
-                self.term.history.remove(0);
-            }
-        }
-        self.term.history_index = self.term.history.len();
-        self.term.draft.clear();
-        self.term.lines.push((format!("{} ", self.term.prompt), terminal::PROMPT_INK));
-        self.term.lines.push((format!("{line}\n"), terminal::INK));
-        let (output, action) = terminal::command(player, &line);
-        if action == 2 {
-            self.term.lines.clear();
-        }
-        if !output.is_empty() {
-            let text = if output.ends_with('\n') { output } else { format!("{output}\n") };
-            self.term.lines.push((text, terminal::INK));
-        }
-        self.term.prompt = terminal::prompt(player);
-        match action {
-            9 => self.set_skin(Skin::Vlc),
-            10..=16 => {
-                if let Some(k) = SKINS.into_iter().find(|k| k.index() == action - 10) {
-                    self.set_skin(k);
-                }
-            }
-            1 => ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true)),
-            4 => self.volume = terminal::volume(player),
-            _ => {}
-        }
-    }
-}
-
-/// Hides the macOS menu bar and Dock while fullscreen, so the top-edge reveal shows only the egui menu.
-fn set_presentation(fullscreen: bool) {
-    let Some(mtm) = MainThreadMarker::new() else { return };
-    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-    let options = if fullscreen {
-        objc2_app_kit::NSApplicationPresentationOptions::HideMenuBar
-            | objc2_app_kit::NSApplicationPresentationOptions::HideDock
-    } else {
-        objc2_app_kit::NSApplicationPresentationOptions::Default
-    };
-    app.setPresentationOptions(options);
-}
-
-/// True when the mouse is within a few points of the top of the main screen.
-fn pointer_near_screen_top() -> bool {
-    let Some(mtm) = MainThreadMarker::new() else { return false };
-    let mouse = unsafe { objc2_app_kit::NSEvent::mouseLocation() };
-    let Some(screen) = objc2_app_kit::NSScreen::mainScreen(mtm) else { return false };
-    let top = screen.frame().size.height;
-    mouse.y > top - 6.0
-}
-
-/// Opens a web link in the default browser. The app does not control the browser's window state.
-fn open_link(url: &str) {
-    let _ = std::process::Command::new("open").arg(url).spawn();
-}
-
-fn prompt_kind(title: &str) -> bool {
-    title == "Open Network Stream"
-}
-
-/// "m:ss" or "h:mm:ss" (or plain seconds) to milliseconds.
-fn parse_time(text: &str) -> Option<i64> {
-    let mut total = 0.0f64;
-    for part in text.trim().split(':') {
-        let v: f64 = part.trim().parse().ok()?;
-        if v < 0.0 {
-            return None;
-        }
-        total = total * 60.0 + v;
-    }
-    Some((total * 1000.0) as i64)
 }
 
 fn install_fonts(ctx: &egui::Context) {
@@ -1738,38 +703,20 @@ fn install_fonts(ctx: &egui::Context) {
         })
     };
     if load("sf", "/System/Library/Fonts/SFNS.ttf", &mut fonts).is_some() {
-        fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "sf".into());
+        fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "sf".into());
     }
     if load("sf-mono", "/System/Library/Fonts/SFNSMono.ttf", &mut fonts).is_some() {
-        fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "sf-mono".into());
+        fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "sf-mono".into());
     }
     if load("symbols", "/System/Library/Fonts/Apple Symbols.ttf", &mut fonts).is_some() {
-        fonts.families.entry(FontFamily::Proportional).or_default().push("symbols".into());
+        fonts.families.entry(egui::FontFamily::Proportional).or_default().push("symbols".into());
     }
     ctx.set_fonts(fonts);
 }
 
-fn stamp(ms: i64) -> String {
-    let s = ms.max(0) / 1000;
-    if s >= 3600 {
-        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
-    } else {
-        format!("{}:{:02}", s / 60, s % 60)
-    }
-}
-
-impl Drop for App {
-    fn drop(&mut self) {
-        if !self.player.is_null() {
-            unsafe { engine::ap_destroy(self.player) };
-            self.player = std::ptr::null_mut();
-        }
-    }
-}
-
 fn main() -> eframe::Result {
-    // The shipping app bundles plugins/ next to its executable. The spike runs from target/,
-    // so point libvlc at the plugins inside VLC.app unless the caller already set it.
+    // ui.m main(): VLC_PLUGIN_PATH points at the bundle's plugins. The spike runs from target/, so it
+    // uses the plugins inside VLC.app unless the caller set the variable.
     if std::env::var_os("VLC_PLUGIN_PATH").is_none() {
         let app = std::env::var("VLC_APP").unwrap_or_else(|_| "/Applications/VLC.app".into());
         std::env::set_var("VLC_PLUGIN_PATH", format!("{app}/Contents/MacOS/plugins"));
@@ -1780,6 +727,7 @@ fn main() -> eframe::Result {
             .with_min_inner_size([720.0, 380.0])
             .with_title("RMP")
             .with_transparent(true),
+        centered: true,
         ..Default::default()
     };
     eframe::run_native("RMP", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))

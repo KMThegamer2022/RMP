@@ -233,10 +233,25 @@ Screenshots: `screenshots/round5/`.
 - A floating transport (seek, Previous, Play/Pause, Next, volume, Exit Full Screen) shows for 2.5 s after the
   mouse moves. The menu bar shows again when the pointer is at the top edge.
 - Verified by running: transport visible after mouse movement; hidden after 2.5 s without movement.
-- Not verified: Ctrl+Cmd+F in the spike (the keystroke did not reach the window in the test); the
-  top-edge menu reveal; Exit Full Screen button.
+- Verified by running (round 12): Ctrl+Cmd+F enters and leaves fullscreen; double-clicking the screen enters it.
+- Not verified: the Exit Full Screen button after the rewrite.
 - Linux fullscreen shows no floating transport, as in the shipping code (`refreshFloating` returns for Linux).
 
 ### Known issues
 - AppKit logs "adding an unknown subview" when the video view is attached to the frame view. The
   layering still works.
+
+### Rewrite verification (round 12)
+The spike was rewritten to cover the shipping app's behaviour (store, menus, commands, dialogs, library,
+queue, update check, About). Checked by running it, with the state dump from the script hook:
+- Shortcuts: Space (play/pause), Cmd+T (jump-to-time dialog), Cmd+L (playlist toggle), Cmd+U (network
+  stream dialog), Ctrl+Cmd+F (fullscreen both ways), Cmd+Q (quits).
+- Queue button shows a popup with a check on the current item (`screenshots/round12/queue-popup.png`).
+- Double-click on the screen enters fullscreen.
+- Windows 7: opens on the Library page; library search filters; Current Playlist page lists the queue;
+  playing from the library switches to Now Playing when video starts.
+- About panel and "up to date" update message (`screenshots/round12/`); wallpaper mode state toggles.
+- Not verified by running: `]` and `[` seek keys, Edit-menu paste into a text field, the capture-device
+  dialog, native file dialogs, the wallpaper window visually, the update install (a non-bundle cannot replace itself).
+- Differences that remain: menu bar is in-window (egui) rather than the native one; font rendering
+  differs slightly; shipping app has no shortcut customisation, so none here.
