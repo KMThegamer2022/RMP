@@ -70,7 +70,7 @@ pub fn input_stats() -> String {
         p.y,
         {
             let f = unsafe { GetFocus() } as isize;
-            if f == 0 { "none".to_string() } else if f == video { "video".to_string() } else if unsafe { GetParent(hwnd(video)) } as isize == f { "main".to_string() } else { format!("other-{f:x}") }
+            if f == 0 { "none".to_string() } else if f != video && unsafe { GetParent(hwnd(video)) } as isize != f { let mut name = [0u16; 64]; let n = unsafe { GetClassNameW(hwnd(f), name.as_mut_ptr(), 64) }; format!("other-{}", String::from_utf16_lossy(&name[..n.max(0) as usize])) } else if f == video { "video".to_string() } else if unsafe { GetParent(hwnd(video)) } as isize == f { "main".to_string() } else { format!("other-{f:x}") }
         },
         app_active()
     )
@@ -208,6 +208,7 @@ impl Surfaces {
                 return None;
             }
             VIDEO_WINDOW.store(video as isize, Ordering::Relaxed);
+            install_key_hook();
             Some(Surfaces { parent, video: video as isize, last: Cell::new(None) })
         }
     }
@@ -592,4 +593,76 @@ pub fn registry_dword(name: &str) -> Option<u32> {
         RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut data as *mut u32 as *mut c_void, &mut size)
     };
     (status == 0).then_some(data)
+}
+
+// ---- Keyboard fallback ------------------------------------------------------------------------
+// Windows moves keyboard focus onto libvlc's output window (and other child windows) after clicks and
+// fullscreen switches, and those never pass keys on. A low-level hook sees every key; while this app
+// is in front but its main window does not hold the focus, the keys are handed to egui instead.
+
+static KEYS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::new(Vec::new());
+
+unsafe extern "system" fn key_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 {
+        let info = &*(lp as *const KBDLLHOOKSTRUCT);
+        let down = wp as u32 == WM_KEYDOWN || wp as u32 == WM_SYSKEYDOWN;
+        let up = wp as u32 == WM_KEYUP || wp as u32 == WM_SYSKEYUP;
+        let main = VIDEO_WINDOW.load(Ordering::Relaxed);
+        if (down || up) && main != 0 && app_active() {
+            let parent = GetParent(hwnd(main));
+            if GetFocus() != parent {
+                if let Ok(mut q) = KEYS.lock() {
+                    if q.len() < 64 {
+                        q.push((info.vkCode, down));
+                    }
+                }
+            }
+        }
+    }
+    CallNextHookEx(std::ptr::null_mut(), code, wp, lp)
+}
+
+fn install_key_hook() {
+    unsafe {
+        SetWindowsHookExW(WH_KEYBOARD_LL, Some(key_hook), GetModuleHandleW(std::ptr::null()), 0);
+    }
+}
+
+fn egui_key(vk: u32) -> Option<egui::Key> {
+    use egui::Key::*;
+    Some(match vk {
+        0x1B => Escape,
+        0x20 => Space,
+        0x0D => Enter,
+        0x09 => Tab,
+        0x08 => Backspace,
+        0x25 => ArrowLeft,
+        0x26 => ArrowUp,
+        0x27 => ArrowRight,
+        0x28 => ArrowDown,
+        0x70 => F1,
+        0x7A => F11,
+        0xDB => OpenBracket,
+        0xDD => CloseBracket,
+        0x41..=0x5A => [A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z][(vk - 0x41) as usize],
+        _ => return None,
+    })
+}
+
+/// Called from `raw_input_hook`: turns keys seen while the main window lacked focus into egui events.
+pub fn inject_keys(raw: &mut egui::RawInput) {
+    let keys: Vec<(u32, bool)> = KEYS.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default();
+    let held = |vk: i32| unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
+    let (ctrl, shift, alt) = (held(0x11), held(0x10), held(0x12));
+    for (vk, pressed) in keys {
+        if let Some(key) = egui_key(vk) {
+            raw.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers { alt, ctrl, shift, mac_cmd: false, command: ctrl },
+            });
+        }
+    }
 }

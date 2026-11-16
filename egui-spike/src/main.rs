@@ -699,6 +699,7 @@ impl eframe::App for App {
 
     /// Edit → Cut/Copy/Paste/Select All become the matching egui events for the focused text field.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        appkit::inject_keys(raw);
         if let Some(action) = self.pending_edit.take() {
             use menus::Action;
             match action {

@@ -314,6 +314,9 @@ pub fn app_active() -> bool {
     MainThreadMarker::new().is_some_and(|mtm| NSApplication::sharedApplication(mtm).isActive())
 }
 
+/// Windows-only: keys that did not reach the main window. Nothing to do on macOS.
+pub fn inject_keys(_raw: &mut eframe::egui::RawInput) {}
+
 /// Test hook: what the mouse polling has seen (Windows only).
 pub fn input_stats() -> String {
     String::new()
