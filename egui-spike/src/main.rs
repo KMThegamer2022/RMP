@@ -761,6 +761,9 @@ impl eframe::App for App {
             }
             self.app_active = active;
         }
+        // Windows has no continuous repaint from video, so keep frames coming for the clock and mouse polling.
+        #[cfg(windows)]
+        ctx.request_repaint_after(std::time::Duration::from_millis(30));
         if appkit::take_video_double_click() && self.has_engine() {
             self.full(&ctx);
         }

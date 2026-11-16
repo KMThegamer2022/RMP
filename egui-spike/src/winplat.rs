@@ -23,6 +23,7 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, GetDoubleClickTime, VK_LBUTTON};
 use windows_sys::Win32::UI::Shell::{DragQueryFileW, ShellExecuteW};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -40,9 +41,57 @@ pub struct Win(pub isize);
 
 static DOUBLE_CLICKED: AtomicBool = AtomicBool::new(false);
 
-/// True once after the video window was double-clicked (the shipping player's WM_LBUTTONDBLCLK).
+static VIDEO_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+struct ClickState {
+    was_down: bool,
+    last_press: Option<std::time::Instant>,
+    last_pos: (i32, i32),
+    last_fire: Option<std::time::Instant>,
+}
+static CLICKS: std::sync::Mutex<ClickState> = std::sync::Mutex::new(ClickState { was_down: false, last_press: None, last_pos: (0, 0), last_fire: None });
+
+/// True once per double-click on the video. The player's own WM_LBUTTONDBLCLK is one source; the other
+/// watches the left button and the pointer position, because libvlc's output window sits on top of ours
+/// and does not reliably pass mouse messages up.
 pub fn take_video_double_click() -> bool {
-    DOUBLE_CLICKED.swap(false, Ordering::Relaxed)
+    let message = DOUBLE_CLICKED.swap(false, Ordering::Relaxed);
+    let mut st = CLICKS.lock().unwrap();
+    let now = std::time::Instant::now();
+    let mut polled = false;
+    let down = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } as u16 & 0x8000 != 0;
+    if down && !st.was_down {
+        let p = cursor();
+        let video = VIDEO_WINDOW.load(Ordering::Relaxed);
+        let inside = video != 0 && unsafe {
+            let mut r = std::mem::zeroed::<RECT>();
+            IsWindowVisible(hwnd(video)) != 0
+                && GetWindowRect(hwnd(video), &mut r) != 0
+                && p.x >= r.left
+                && p.x < r.right
+                && p.y >= r.top
+                && p.y < r.bottom
+        };
+        if inside {
+            let window = std::time::Duration::from_millis(unsafe { GetDoubleClickTime() } as u64);
+            let near = (p.x - st.last_pos.0).abs() <= 8 && (p.y - st.last_pos.1).abs() <= 8;
+            if st.last_press.is_some_and(|t| now.duration_since(t) <= window) && near {
+                polled = true;
+                st.last_press = None;
+            } else {
+                st.last_press = Some(now);
+                st.last_pos = (p.x, p.y);
+            }
+        } else {
+            st.last_press = None;
+        }
+    }
+    st.was_down = down;
+    let fire = (message || polled) && st.last_fire.is_none_or(|t| now.duration_since(t) > std::time::Duration::from_millis(600));
+    if fire {
+        st.last_fire = Some(now);
+    }
+    fire
 }
 
 unsafe extern "system" fn video_proc(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -99,6 +148,7 @@ impl Surfaces {
             if video.is_null() {
                 return None;
             }
+            VIDEO_WINDOW.store(video as isize, Ordering::Relaxed);
             Some(Surfaces { parent, video: video as isize, last: Cell::new(None) })
         }
     }
