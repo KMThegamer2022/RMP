@@ -258,3 +258,20 @@ queue, update check, About). Checked by running it, with the state dump from the
 
 ### Installer (round 12)
 `packaging/build-app.sh` builds a signed (ad-hoc) RMP.app with VLC bundled, then an installer dmg using the shipping `packaging/mac-setup.sh`. Output: `build/RMP-egui.dmg`. Verified: dmg mounts, bundle signature valid, bundled app plays with no VLC_PLUGIN_PATH set. Not verified: running the Setup app, a second Mac, Gatekeeper (ad-hoc signed, not notarised). Preferences live in "RMP egui spike", separate from the shipping app.
+
+### Windows build, updates and release (round 13)
+- Windows: `src/winplat.rs` mirrors `appkit.rs`. libvlc draws into a child window of the egui window, so egui cannot
+  draw over the video: it is hidden under menus and dialogs and shortened above the fullscreen transport.
+  Menus and shortcuts follow `windows/player-menus.h`. Not like macOS: no Windows 7 glass, drawn icons instead of
+  SF Symbols, paused video shows no logo over it.
+- CI (`.github/workflows/egui-windows.yml`, `packaging/windows/test-egui.ps1`) runs on the portable build and on the
+  installed build: playback with video, double-click fullscreen, Escape, Space, all seven skins, Check for Updates.
+  The installer registers file types and uninstalls; both checked. Not verified on real hardware: sound, GPU
+  rendering, real keyboard focus after clicks, Set as Wallpaper.
+- Updates: macOS downloads, checks SHA-256, verifies the signature, bundle id and version, then runs the bundle's
+  `mac-install.sh`. Windows uses the shipping `update.ps1`. Debug builds accept a local manifest
+  (`RMP_SPIKE_UPDATE_MANIFEST`, `RMP_SPIKE_UPDATE_BASE`) so the path was run end to end without publishing.
+- First run imports the shipping app's settings (macOS defaults, Windows registry).
+- Files: opening from Finder (at launch and while running) and drag and drop.
+- Release v4.0.0 exists on GitHub as a pre-release. `updates/latest.json` on main is NOT changed yet; that push is
+  what offers the update to existing installs.
