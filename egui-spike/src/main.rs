@@ -485,7 +485,7 @@ impl App {
                 .into_iter()
                 .map(|a| {
                     let file = std::path::Path::new(&a).exists();
-                    let path = if file { std::fs::canonicalize(&a).map(|p| p.to_string_lossy().into_owned()).unwrap_or(a) } else { a };
+                    let path = if file { std::fs::canonicalize(&a).map(|p| plain_path(&p)).unwrap_or(a) } else { a };
                     (path, !file)
                 })
                 .collect();
@@ -666,6 +666,15 @@ impl App {
         if let Some(p) = run {
             self.run_picked(p, ctx);
         }
+    }
+}
+
+/// A path as libvlc wants it: Windows canonicalize returns \\?\ verbatim paths, which libvlc cannot open.
+fn plain_path(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().into_owned();
+    match s.strip_prefix("\\\\?\\") {
+        Some(rest) if !rest.starts_with("UNC") => rest.to_string(),
+        _ => s,
     }
 }
 
