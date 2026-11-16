@@ -144,12 +144,12 @@ impl App {
                     }
                 }
                 "shot" => {
-                    if let Some(rect) = self.surfaces.as_ref().and_then(|s| s.window()).and_then(|w| crate::appkit::capture_rect(&w)) {
-                        let _ = std::process::Command::new("/usr/sbin/screencapture").args(["-x", "-R", &rect, rest]).status();
+                    if let Some(w) = self.surfaces.as_ref().and_then(|s| s.window()) {
+                        crate::appkit::screenshot(Some(&w), rest);
                     }
                 }
                 "shotall" => {
-                    let _ = std::process::Command::new("/usr/sbin/screencapture").args(["-x", rest]).status();
+                    crate::appkit::screenshot(None, rest);
                 }
                 "term" => {
                     if let Some(raw) = self.engine.as_ref().map(|e| e.raw()) {

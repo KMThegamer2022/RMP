@@ -117,7 +117,7 @@ impl App {
             return;
         }
         let expanded = if let Some(rest) = location.strip_prefix('~') {
-            format!("{}{}", std::env::var("HOME").unwrap_or_default(), rest)
+            format!("{}{}", std::env::var(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap_or_default(), rest)
         } else {
             location.to_string()
         };
@@ -213,6 +213,7 @@ impl App {
     /// openCapture's device list: the screen, cameras and microphones.
     fn open_capture(&mut self) {
         let mut devices = vec![("Screen".to_string(), "screen://".to_string())];
+        #[cfg(target_os = "macos")]
         unsafe {
             use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio, AVMediaTypeVideo};
             for (ty, scheme) in [(AVMediaTypeVideo, "avcapture://"), (AVMediaTypeAudio, "avaudiocapture://")] {
@@ -224,30 +225,39 @@ impl App {
                 }
             }
         }
+        #[cfg(windows)]
+        {
+            // DirectShow chooses its default camera and microphone.
+            devices.push(("Default camera".to_string(), "dshow://".to_string()));
+            devices.push(("Default microphone".to_string(), "dshow:// :dshow-vdev=none".to_string()));
+        }
         self.dialogs.push(Dialog::Capture { devices, selected: 0 });
     }
 
     /// The Play button of the capture dialog: the screen opens directly; devices ask for access first.
     pub fn capture_chosen(&mut self, source: String) {
-        if source.starts_with("screen:") {
+        if source.starts_with("screen:") || cfg!(windows) {
             self.open_location(&source);
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.capture_rx = Some(rx);
-        let audio = source.starts_with("avaudio");
-        unsafe {
-            use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio, AVMediaTypeVideo};
-            let ty = if audio { AVMediaTypeAudio } else { AVMediaTypeVideo };
-            let Some(ty) = ty else { return };
-            let tx = std::sync::Mutex::new(Some(tx));
-            let src = source.clone();
-            let block = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
-                if let Some(tx) = tx.lock().ok().and_then(|mut t| t.take()) {
-                    let _ = tx.send((granted.as_bool(), src.clone()));
-                }
-            });
-            AVCaptureDevice::requestAccessForMediaType_completionHandler(ty, &block);
+        #[cfg(target_os = "macos")]
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.capture_rx = Some(rx);
+            let audio = source.starts_with("avaudio");
+            unsafe {
+                use objc2_av_foundation::{AVCaptureDevice, AVMediaTypeAudio, AVMediaTypeVideo};
+                let ty = if audio { AVMediaTypeAudio } else { AVMediaTypeVideo };
+                let Some(ty) = ty else { return };
+                let tx = std::sync::Mutex::new(Some(tx));
+                let src = source.clone();
+                let block = block2::RcBlock::new(move |granted: objc2::runtime::Bool| {
+                    if let Some(tx) = tx.lock().ok().and_then(|mut t| t.take()) {
+                        let _ = tx.send((granted.as_bool(), src.clone()));
+                    }
+                });
+                AVCaptureDevice::requestAccessForMediaType_completionHandler(ty, &block);
+            }
         }
     }
 

@@ -53,7 +53,10 @@ impl Loader {
                         Some(p) => p,
                         None => return,
                     };
+                    #[cfg(target_os = "macos")]
                     let meta = objc2::rc::autoreleasepool(|_| read(&path));
+                    #[cfg(windows)]
+                    let meta = read(&path);
                     if let Ok(mut s) = shared.lock() {
                         s.pending.remove(&path);
                         s.done.insert(path, meta);
@@ -70,7 +73,7 @@ impl Loader {
         if let Some(m) = s.done.get(path) {
             return Some(m.clone());
         }
-        if s.pending.contains(path) || !path.starts_with('/') || s.pending.len() >= 64 {
+        if s.pending.contains(path) || !std::path::Path::new(path).is_absolute() || s.pending.len() >= 64 {
             return None;
         }
         s.pending.insert(path.to_string());
@@ -88,6 +91,7 @@ pub fn stamp(ms: i64) -> String {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn read(path: &str) -> Meta {
     use objc2_av_foundation::{AVAsset, AVURLAsset};
     use objc2_foundation::{NSString, NSURL};
@@ -134,6 +138,28 @@ fn read(path: &str) -> Meta {
         if valid && t.timescale > 0 {
             meta.length = Some(stamp(((t.value as f64) * 1000.0 / t.timescale as f64).round() as i64));
         }
+    }
+    meta
+}
+
+/// Windows: tags, artwork and duration read with lofty.
+#[cfg(windows)]
+fn read(path: &str) -> Meta {
+    use lofty::file::{AudioFile, TaggedFileExt};
+    use lofty::tag::Accessor;
+    let mut meta = Meta::default();
+    let Ok(file) = lofty::read_from_path(path) else { return meta };
+    if let Some(tag) = file.primary_tag().or_else(|| file.first_tag()) {
+        meta.title = tag.title().map(|v| v.to_string()).filter(|v| !v.is_empty());
+        meta.album = tag.album().map(|v| v.to_string()).filter(|v| !v.is_empty());
+        meta.artist = tag.artist().map(|v| v.to_string()).filter(|v| !v.is_empty());
+        if let Some(pic) = tag.pictures().first() {
+            meta.cover = Some(Arc::new(pic.data().to_vec()));
+        }
+    }
+    let ms = file.properties().duration().as_millis() as i64;
+    if ms > 0 {
+        meta.length = Some(stamp(ms));
     }
     meta
 }

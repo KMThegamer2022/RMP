@@ -190,7 +190,19 @@ pub fn draw(app: &mut App, ui: &mut egui::Ui, ctx: &egui::Context) {
     // The video is a native view behind egui. It is placed over the screen rectangle; egui paints
     // black only when libvlc has no video output (and, in the Linux skin, while nothing plays).
     if let Some(s) = app.surfaces.as_ref() {
-        s.place_video(media_video.then_some(g.screen).filter(|_| !idle || true));
+        let mut video_rect = media_video.then_some(g.screen).filter(|_| !idle || true);
+        #[cfg(windows)]
+        {
+            // A child window paints over egui: show it only while libvlc has video, hide it under
+            // menus and dialogs, and stop it above the fullscreen transport.
+            let overlay = egui::Popup::is_any_open(ctx) || !app.dialogs.is_empty();
+            let showing = has_video && state <= 4 && !overlay;
+            video_rect = video_rect.filter(|_| showing);
+            if in_full && app.float_visible {
+                video_rect = video_rect.map(|r| Rect::from_min_max(r.min, Pos2::new(r.right(), r.bottom() - 124.0)));
+            }
+        }
+        s.place_video(video_rect);
     }
     if media_video {
         let linux_black = skin == Skin::Linux && !(has_video && state <= 4);

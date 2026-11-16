@@ -1,7 +1,13 @@
-//! RMP with an egui interface, driving the existing Rust engine (repo-root src/lib.rs) on macOS.
+//! RMP with an egui interface, driving the existing Rust engine (repo-root src/lib.rs) on macOS and Windows.
 //! Behaviour follows the shipping AppKit app: ui.m, mac-menus.h, mac-library.h, mac-fullscreen.h,
 //! mac-terminal.h, mac-theme.h and updates/mac.h. The shipping app is not changed.
 
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+#[cfg(target_os = "macos")]
+mod appkit;
+#[cfg(windows)]
+#[path = "winplat.rs"]
 mod appkit;
 mod commands;
 mod dialogs;
@@ -31,8 +37,13 @@ const LINK_TARGET: &str = "https://www.youtube.com/watch?v=yEh_4GqXqFc";
 /// egui lays SF out about 12% narrower than AppKit does, so explicit font sizes are scaled to match
 /// the shipping text widths (measured on "Previous", the clock and the 18 pt item name).
 pub fn fs(size: f32) -> f32 {
-    size * 1.12
+    size * FONT_SCALE
 }
+/// Segoe UI on Windows is laid out at the widths the shipping player uses, so no correction there.
+#[cfg(target_os = "macos")]
+pub const FONT_SCALE: f32 = 1.12;
+#[cfg(not(target_os = "macos"))]
+pub const FONT_SCALE: f32 = 1.0;
 
 /// How long the fullscreen transport stays up after the mouse last moved (refreshFloating).
 const FLOAT_HIDE_SECS: f64 = 2.5;
@@ -544,7 +555,9 @@ impl App {
             appkit::open_url(LINK_TARGET);
         }
         let typing = ctx.memory(|m| m.focused().is_some());
-        if hit(egui::Key::Q, false, true, false) {
+        // Command on macOS; Ctrl on Windows, where egui reports Ctrl as both `command` and `ctrl`.
+        let primary = |key: egui::Key, shift: bool| hit(key, shift, true, cfg!(windows));
+        if primary(egui::Key::Q, false) {
             self.quit_requested = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
@@ -554,7 +567,63 @@ impl App {
         }
         use menus::{Action, Picked};
         let mut run: Option<Picked> = None;
-        if hit(egui::Key::Space, false, false, false) {
+        let cmd = |key: &'static str, title: &str| Picked::Command { key, value: String::new(), title: title.into() };
+        if cfg!(windows) {
+            // player-menus.h accelerators.
+            if hit(egui::Key::Space, false, false, false) {
+                run = Some(Picked::Action(Action::PlayPause));
+            } else if primary(egui::Key::O, false) {
+                run = Some(Picked::Action(Action::OpenSingle));
+            } else if primary(egui::Key::O, true) {
+                run = Some(Picked::Action(Action::OpenMultiple));
+            } else if primary(egui::Key::N, false) {
+                run = Some(Picked::Action(Action::OpenStream));
+            } else if primary(egui::Key::Y, false) {
+                run = Some(Picked::Action(Action::SavePlaylist));
+            } else if primary(egui::Key::F, false) {
+                run = Some(cmd("folder", "Open Folder…"));
+            } else if primary(egui::Key::D, false) {
+                run = Some(cmd("disc", "Open Disc…"));
+            } else if primary(egui::Key::C, false) {
+                run = Some(cmd("capture", "Open Capture Device…"));
+            } else if primary(egui::Key::V, false) {
+                run = Some(cmd("clipboard", "Open Location from Clipboard"));
+            } else if primary(egui::Key::R, false) {
+                run = Some(cmd("convert", "Convert / Save…"));
+            } else if primary(egui::Key::S, false) {
+                run = Some(cmd("stream-out", "Stream…"));
+            } else if primary(egui::Key::T, false) {
+                if self.menu_enabled("time") {
+                    run = Some(cmd("time", "Jump to Specific Time…"));
+                }
+            } else if primary(egui::Key::E, false) {
+                run = Some(cmd("effects", "Effects and Filters…"));
+            } else if primary(egui::Key::I, false) {
+                run = Some(cmd("media-info", "Media Information"));
+            } else if primary(egui::Key::J, false) {
+                run = Some(cmd("codec-info", "Codec Information"));
+            } else if primary(egui::Key::W, true) {
+                run = Some(cmd("vlm", "VLM Configuration"));
+            } else if primary(egui::Key::M, false) {
+                run = Some(cmd("messages", "Messages"));
+            } else if primary(egui::Key::P, false) {
+                run = Some(cmd("preferences", "Preferences…"));
+            } else if primary(egui::Key::L, false) {
+                run = Some(cmd("playlist", "Playlist"));
+            } else if primary(egui::Key::H, false) {
+                run = Some(cmd("minimal", "Minimal Interface"));
+            } else if primary(egui::Key::ArrowUp, false) {
+                run = Some(Picked::Command { key: "volume-step", value: "5".into(), title: "Increase Volume".into() });
+            } else if primary(egui::Key::ArrowDown, false) {
+                run = Some(Picked::Command { key: "volume-step", value: "-5".into(), title: "Decrease Volume".into() });
+            } else if hit(egui::Key::F11, false, false, false) || (self.in_full && hit(egui::Key::Escape, false, false, false)) {
+                run = Some(Picked::Action(Action::Fullscreen));
+            } else if hit(egui::Key::F1, true, false, false) {
+                run = Some(Picked::Action(Action::About));
+            } else if self.wallpaper.is_some() && hit(egui::Key::Escape, false, false, false) {
+                self.toggle_wallpaper();
+            }
+        } else if hit(egui::Key::Space, false, false, false) {
             run = Some(Picked::Action(Action::PlayPause));
         } else if hit(egui::Key::O, false, true, false) {
             run = Some(Picked::Action(Action::OpenSingle));
@@ -661,12 +730,15 @@ impl eframe::App for App {
             }
         }
         // Wallpaper mode ends when the app is activated again (applicationShouldHandleReopen).
-        if let Some(mtm) = objc2::MainThreadMarker::new() {
-            let active = objc2_app_kit::NSApplication::sharedApplication(mtm).isActive();
+        {
+            let active = appkit::app_active();
             if active && !self.app_active && self.wallpaper.is_some() {
                 self.toggle_wallpaper();
             }
             self.app_active = active;
+        }
+        if appkit::take_video_double_click() && self.has_engine() {
+            self.full(&ctx);
         }
         self.apply_chrome(&ctx);
         self.poll_background();
@@ -702,13 +774,18 @@ fn install_fonts(ctx: &egui::Context) {
             fonts.font_data.insert(name.into(), egui::FontData::from_owned(bytes).into());
         })
     };
-    if load("sf", "/System/Library/Fonts/SFNS.ttf", &mut fonts).is_some() {
+    #[cfg(target_os = "macos")]
+    let (ui_font, mono_font, symbol_font) =
+        ("/System/Library/Fonts/SFNS.ttf", "/System/Library/Fonts/SFNSMono.ttf", "/System/Library/Fonts/Apple Symbols.ttf");
+    #[cfg(windows)]
+    let (ui_font, mono_font, symbol_font) = ("C:\\Windows\\Fonts\\segoeui.ttf", "C:\\Windows\\Fonts\\consola.ttf", "C:\\Windows\\Fonts\\seguisym.ttf");
+    if load("sf", ui_font, &mut fonts).is_some() {
         fonts.families.entry(egui::FontFamily::Proportional).or_default().insert(0, "sf".into());
     }
-    if load("sf-mono", "/System/Library/Fonts/SFNSMono.ttf", &mut fonts).is_some() {
+    if load("sf-mono", mono_font, &mut fonts).is_some() {
         fonts.families.entry(egui::FontFamily::Monospace).or_default().insert(0, "sf-mono".into());
     }
-    if load("symbols", "/System/Library/Fonts/Apple Symbols.ttf", &mut fonts).is_some() {
+    if load("symbols", symbol_font, &mut fonts).is_some() {
         fonts.families.entry(egui::FontFamily::Proportional).or_default().push("symbols".into());
     }
     ctx.set_fonts(fonts);
@@ -721,17 +798,25 @@ fn main() -> eframe::Result {
     if let (None, Some(dir)) = (std::env::var_os("VLC_PLUGIN_PATH"), bundled) {
         std::env::set_var("VLC_PLUGIN_PATH", dir);
     }
+    #[cfg(target_os = "macos")]
     if std::env::var_os("VLC_PLUGIN_PATH").is_none() {
         let app = std::env::var("VLC_APP").unwrap_or_else(|_| "/Applications/VLC.app".into());
         std::env::set_var("VLC_PLUGIN_PATH", format!("{app}/Contents/MacOS/plugins"));
     }
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([900.0, 570.0])
+        .with_min_inner_size([720.0, 380.0])
+        .with_title("RMP")
+        .with_transparent(cfg!(target_os = "macos"));
+    #[cfg(windows)]
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(LOGO_PNG) {
+        viewport = viewport.with_icon(icon);
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 570.0])
-            .with_min_inner_size([720.0, 380.0])
-            .with_title("RMP")
-            .with_transparent(true),
+        viewport,
         centered: true,
+        #[cfg(windows)]
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
     eframe::run_native("RMP", options, Box::new(|cc| Ok(Box::new(App::new(cc)))))

@@ -42,7 +42,14 @@ pub fn check() -> Receiver<Outcome> {
 
 fn run() -> Outcome {
     let current = current_version();
-    let out = std::process::Command::new("/usr/bin/curl")
+    let curl = if cfg!(windows) { "curl.exe" } else { "/usr/bin/curl" };
+    let mut command = std::process::Command::new(curl);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = command
         .args(["-fsSL", "--max-time", "15", "-H", "User-Agent: RMP-Updater", "-H", "Cache-Control: no-cache", MANIFEST_URL])
         .output();
     let body = match out {
@@ -56,13 +63,13 @@ fn run() -> Outcome {
     let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
     let version = s(&json["version"]);
     let tag = s(&json["tag"]);
-    let name = s(&json["macos"]["name"]);
-    let sha = s(&json["macos"]["sha256"]);
+    let platform = if cfg!(windows) { "windows" } else { "macos" };
+    let name = s(&json[platform]["name"]);
+    let sha = s(&json[platform]["sha256"]);
     if valid(&version)
         && newer(&version, &current)
         && !tag.is_empty()
-        && name.starts_with("RMP-")
-        && name.ends_with("macOS-arm64.zip")
+        && if cfg!(windows) { name == "RMP-Setup-x64.exe" } else { name.starts_with("RMP-") && name.ends_with("macOS-arm64.zip") }
         && !name.contains('/')
         && sha.len() == 64
     {

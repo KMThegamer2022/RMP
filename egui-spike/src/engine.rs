@@ -139,8 +139,11 @@ impl Drop for Engine {
 }
 
 pub fn display_name(s: &str) -> String {
-    let trimmed = s.trim_end_matches('/');
-    match trimmed.rsplit('/').next() {
+    #[cfg(windows)]
+    let (trimmed, is_sep): (&str, fn(char) -> bool) = (s.trim_end_matches(['/', '\\']), |c| c == '/' || c == '\\');
+    #[cfg(not(windows))]
+    let (trimmed, is_sep): (&str, fn(char) -> bool) = (s.trim_end_matches('/'), |c| c == '/');
+    match trimmed.rsplit(is_sep).next() {
         Some(last) if !last.is_empty() => last.to_string(),
         _ => s.to_string(),
     }

@@ -8,8 +8,16 @@ use std::path::PathBuf;
 const RECENT_MAX: usize = 20;
 
 fn dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike"))
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(PathBuf::from(home).join("Library/Application Support/RMP egui spike"))
+    }
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("APPDATA")?;
+        Some(PathBuf::from(base).join("RMP egui"))
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -24,6 +32,16 @@ pub struct Store {
     pub recent: Vec<String>,
     /// RMP_SPIKE_THEME overrides the theme for one run and nothing is saved while it is set.
     theme_override: bool,
+}
+
+/// Windows: the theme the installer asked for. Elsewhere there is none.
+fn first_run_theme() -> Option<Skin> {
+    #[cfg(windows)]
+    {
+        return crate::appkit::installer_theme().and_then(Skin::from_index);
+    }
+    #[cfg(not(windows))]
+    None
 }
 
 impl Store {
@@ -54,6 +72,8 @@ impl Store {
                         _ => {}
                     }
                 }
+            } else if let Some(skin) = first_run_theme() {
+                s.theme = skin;
             } else if let Ok(t) = std::fs::read_to_string(d.join("theme.txt")) {
                 // Earlier spike builds kept only the theme.
                 s.theme = Skin::from_slug(&t).unwrap_or(Skin::Vlc);

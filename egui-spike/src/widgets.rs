@@ -107,7 +107,7 @@ pub fn bold(ui: &mut egui::Ui, text: &str, size: f32, color: Color32) -> egui::R
 /// Width of a button for `title`: NSButton measures SF text wider than egui does (about 1.22×),
 /// plus TransportButton's +14 and the cell padding. Measured on the shipping VLC skin.
 pub fn button_width(ui: &egui::Ui, title: &str) -> f32 {
-    text_width(ui, title, 13.0) * 1.09 + 16.0
+    text_width(ui, title, 13.0) * if cfg!(target_os = "macos") { 1.09 } else { 1.0 } + 16.0
 }
 
 pub fn text_width(ui: &egui::Ui, caption: &str, size: f32) -> f32 {

@@ -308,3 +308,22 @@ pub fn set_desktop_shortcut(on: bool) -> bool {
     }
     true
 }
+
+/// True while this app is the active application.
+pub fn app_active() -> bool {
+    MainThreadMarker::new().is_some_and(|mtm| NSApplication::sharedApplication(mtm).isActive())
+}
+
+/// Windows-only: a double-click on the libvlc window. On macOS egui sees the click itself.
+pub fn take_video_double_click() -> bool {
+    false
+}
+
+/// Saves a PNG of the window, or of the whole screen when `window` is None (test hook).
+pub fn screenshot(window: Option<&NSWindow>, path: &str) {
+    let args: Vec<String> = match window.and_then(capture_rect) {
+        Some(rect) => vec!["-x".into(), "-R".into(), rect, path.into()],
+        None => vec!["-x".into(), path.into()],
+    };
+    let _ = std::process::Command::new("/usr/sbin/screencapture").args(args).status();
+}

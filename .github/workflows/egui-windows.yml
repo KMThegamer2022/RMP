@@ -1,0 +1,60 @@
+name: Build egui Windows player
+on:
+  push:
+    branches: [egui-spike]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: egui-spike
+      - name: Fetch pinned VideoLAN runtime
+        shell: pwsh
+        run: |
+          curl.exe --fail --location --retry 3 https://download.videolan.org/pub/videolan/vlc/3.0.24/win64/vlc-3.0.24-win64.7z -o vlc.7z
+          if ((Get-FileHash vlc.7z).Hash -ne '1ED59C09152E78AFF84663FA76EFAB26057716576DB74332858810E5EF54AE1F') { throw 'Unexpected VLC digest' }
+          7z x -y vlc.7z
+      - name: Compile and bundle RMP (egui)
+        shell: bash
+        run: bash egui-spike/packaging/windows/build.sh vlc-3.0.24 build/RMP
+      - name: Index bundled codecs
+        shell: pwsh
+        run: |
+          ./vlc-3.0.24/vlc-cache-gen.exe (Resolve-Path build/RMP/plugins)
+          if (!(Test-Path build/RMP/plugins/plugins.dat)) { throw 'Missing codec index' }
+      - name: Exercise playback, mouse, keyboard and every skin
+        shell: pwsh
+        run: ./egui-spike/packaging/windows/test-egui.ps1 ./build/RMP/RMP.exe (Resolve-Path packaging/fixtures/open-video.mp4) egui-checks
+      - name: Build installer and test installed playback
+        shell: pwsh
+        run: |
+          ./egui-spike/packaging/windows/make-installer.ps1
+          $p = Start-Process ./RMP-egui-Setup-x64.exe -ArgumentList '/S' -PassThru -Wait
+          if ($p.ExitCode) { throw 'Install failed' }
+          $app = "$env:LOCALAPPDATA/Programs/RMP"
+          if (!(Test-Path "$app/RMP.exe")) { throw 'Installed app missing' }
+          if ((Get-ItemPropertyValue HKCU:/Software/RMP/Capabilities/FileAssociations '.mkv') -ne 'RMP.Media') { throw 'Media registration failed' }
+          ./egui-spike/packaging/windows/test-egui.ps1 "$app/RMP.exe" (Resolve-Path packaging/fixtures/open-video.mp4) egui-checks-installed
+          Start-Process "$app/Uninstall.exe" -ArgumentList '/S' -Wait
+          $limit = [DateTime]::UtcNow.AddSeconds(30)
+          while ((Test-Path "$app/RMP.exe") -and [DateTime]::UtcNow -lt $limit) { Start-Sleep -Milliseconds 200 }
+          if (Test-Path "$app/RMP.exe") { throw 'Uninstall failed' }
+      - name: Zip the portable build
+        if: always()
+        shell: pwsh
+        run: if (Test-Path build/RMP) { 7z a -tzip RMP-egui-Windows-x64.zip ./build/RMP }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RMP-egui-Windows-x64
+          path: |
+            RMP-egui-Windows-x64.zip
+            RMP-egui-Setup-x64.exe
+            egui-checks/
+            egui-checks-installed/
+          if-no-files-found: ignore

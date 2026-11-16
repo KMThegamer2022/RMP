@@ -1,0 +1,99 @@
+# Drives the egui RMP through its script hook and real mouse/keyboard input, then checks the state log.
+param([string]$Exe, [string]$Fixture, [string]$OutDir)
+$ErrorActionPreference = 'Stop'
+$Exe = (Resolve-Path $Exe).Path
+$null = New-Item -ItemType Directory -Force $OutDir
+$OutDir = (Resolve-Path $OutDir).Path
+Add-Type -Language CSharp @'
+using System; using System.Runtime.InteropServices;
+public class In {
+ [DllImport("user32")] public static extern void mouse_event(uint f,int dx,int dy,uint d,UIntPtr e);
+ [DllImport("user32")] public static extern void keybd_event(byte vk,byte scan,uint f,UIntPtr e);
+ [DllImport("user32")] public static extern bool SetCursorPos(int x,int y);
+ [DllImport("user32")] public static extern bool SetForegroundWindow(IntPtr w);
+ [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out RECT r);
+ [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+ public static void Key(byte vk){ keybd_event(vk,0,0,UIntPtr.Zero); keybd_event(vk,0,2,UIntPtr.Zero); }
+ public static void Click(int x,int y,int n){ SetCursorPos(x,y); for(int i=0;i<n;i++){ mouse_event(2,0,0,0,UIntPtr.Zero); mouse_event(4,0,0,0,UIntPtr.Zero); System.Threading.Thread.Sleep(60);} }
+}
+'@
+function Wait-Label($log, $label, $seconds = 40) {
+  $limit = (Get-Date).AddSeconds($seconds)
+  while ((Get-Date) -lt $limit) {
+    if ((Test-Path $log) -and (Select-String -Path $log -Pattern "^$label " -Quiet)) { return }
+    Start-Sleep -Milliseconds 200
+  }
+  throw "Timed out waiting for '$label' in the state log"
+}
+function Field($log, $label, $field) {
+  $line = (Select-String -Path $log -Pattern "^$label " | Select-Object -First 1).Line
+  if ($line -match "$field=(\S+)") { return $Matches[1] }
+  throw "No $field in '$label'"
+}
+function Expect($actual, $expected, $what) {
+  if ($actual -ne $expected) { throw "$what`: expected $expected, got $actual" }
+  Write-Host "OK  $what = $actual"
+}
+
+# --- Playback, keyboard and mouse ---------------------------------------------------------------
+$log = Join-Path $OutDir 'state.log'
+Remove-Item $log -ErrorAction SilentlyContinue
+$script = Join-Path $OutDir 'drive.txt'
+@"
+wait 3
+dump a
+wait 5
+dump b
+wait 5
+dump c
+wait 5
+dump d
+shotall $(Join-Path $OutDir 'screen.png')
+quit
+"@ | Set-Content $script
+$env:RMP_SPIKE_SCRIPT = $script; $env:RMP_SPIKE_LOG = $log; $env:RMP_SPIKE_NO_UPDATE_CHECK = '1'; $env:RMP_SPIKE_THEME = 'vlc'
+$p = Start-Process $Exe -ArgumentList "`"$Fixture`"" -PassThru
+$window = [IntPtr]::Zero
+for ($i = 0; $i -lt 200 -and $window -eq [IntPtr]::Zero; $i++) { $p.Refresh(); $window = $p.MainWindowHandle; Start-Sleep -Milliseconds 100 }
+if ($window -eq [IntPtr]::Zero) { throw 'RMP did not open a window' }
+Wait-Label $log 'a'
+Expect (Field $log 'a' 'state') '3' 'playing after launch'
+Expect (Field $log 'a' 'video') 'true' 'video output present'
+Expect (Field $log 'a' 'full') 'false' 'windowed at start'
+# Double-click on the screen enters fullscreen.
+[void][In]::SetForegroundWindow($window)
+$r = New-Object In+RECT; [void][In]::GetWindowRect($window, [ref]$r)
+[In]::Click([int](($r.L + $r.R) / 2), [int](($r.T + $r.B) / 2), 2)
+Wait-Label $log 'b'
+Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen'
+# Escape leaves fullscreen.
+[void][In]::SetForegroundWindow($window)
+[In]::Key(0x1B)
+Wait-Label $log 'c'
+Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen'
+# Space pauses.
+[void][In]::SetForegroundWindow($window)
+[In]::Key(0x20)
+Wait-Label $log 'd'
+Expect (Field $log 'd' 'state') '4' 'Space pauses'
+if (!$p.WaitForExit(20000)) { $p.Kill(); throw 'RMP did not quit from the script' }
+Copy-Item $log (Join-Path $OutDir 'state-final.log')
+
+# --- Every skin, with a screenshot of each ---------------------------------------------------
+foreach ($skin in 'vlc', 'rmp-default', 'win10', 'win7', 'xp', 'mac', 'linux') {
+  $log = Join-Path $OutDir "skin-$skin.log"
+  Remove-Item $log -ErrorAction SilentlyContinue
+  $env:RMP_SPIKE_LOG = $log; $env:RMP_SPIKE_THEME = $skin
+  @"
+wait 5
+dump skin
+shot $(Join-Path $OutDir "skin-$skin.png")
+quit
+"@ | Set-Content $script
+  $p = Start-Process $Exe -ArgumentList "`"$Fixture`"" -PassThru
+  Wait-Label $log 'skin' 30
+  Expect (Field $log 'skin' 'skin') $skin "skin $skin applied"
+  Expect (Field $log 'skin' 'state') '3' "skin $skin playing"
+  if (!$p.WaitForExit(20000)) { $p.Kill() }
+}
+Write-Host 'All egui checks passed'

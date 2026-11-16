@@ -8,17 +8,24 @@ publish = false
 [workspace]
 
 [dependencies]
-block2 = "0.6"
 eframe = "0.37.0"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "tiff"] }
+raw-window-handle = "0.6.2"
+rfd = "0.18.0"
+serde_json = "1.0.154"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
 objc2 = { version = "0.6.5", default-features = false }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSColor", "NSColorSpace", "NSEvent", "NSGraphics", "NSImage", "NSImageRep", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSView", "NSVisualEffectView", "NSWindow", "NSWindowScripting", "NSWorkspace", "objc2-core-foundation"] }
 objc2-av-foundation = { version = "0.3.2", features = ["AVAsset", "AVMetadataItem", "AVMetadataFormat", "AVCaptureDevice", "AVMediaFormat", "objc2-core-media"] }
 objc2-core-media = { version = "0.3.2", features = ["CMTime"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSBundle", "NSData", "NSDictionary", "NSFileManager", "NSGeometry", "NSObjCRuntime", "NSPathUtilities", "NSString", "NSURL", "NSValue"] }
-raw-window-handle = "0.6.2"
-rfd = "0.18.0"
-serde_json = "1.0.154"
+
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37.0", features = ["wgpu"] }
+lofty = "0.22"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # The engine itself: src/lib.rs at the repo root, compiled unchanged as this crate's library.
 # Making it the library root keeps its `crate::` paths valid.

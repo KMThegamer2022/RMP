@@ -65,6 +65,72 @@ fn opts(title: &'static str, key: &'static str) -> Entry {
 }
 
 pub fn menu_bar() -> Vec<(&'static str, Vec<Entry>)> {
+    let bar = mac_menu_bar();
+    #[cfg(windows)]
+    {
+        // player-menus.h: no app menu or Edit menu; Ctrl accelerators; About and updates live in Help.
+        return bar.into_iter().filter(|(t, _)| *t != "RMP" && *t != "Edit").map(|(t, e)| (t, windows_entries(e, t))).collect();
+    }
+    #[cfg(not(windows))]
+    bar
+}
+
+#[cfg(windows)]
+fn windows_entries(entries: Vec<Entry>, menu: &'static str) -> Vec<Entry> {
+    entries
+        .into_iter()
+        .map(|e| match e {
+            Entry::Cmd { title, key, value, .. } => {
+                let shortcut = match (key, value) {
+                    ("folder", _) => "Ctrl+F",
+                    ("disc", _) => "Ctrl+D",
+                    ("capture", _) => "Ctrl+C",
+                    ("clipboard", _) => "Ctrl+V",
+                    ("convert", _) => "Ctrl+R",
+                    ("stream-out", _) => "Ctrl+S",
+                    ("time", _) => "Ctrl+T",
+                    ("effects", _) => "Ctrl+E",
+                    ("media-info", _) => "Ctrl+I",
+                    ("codec-info", _) => "Ctrl+J",
+                    ("vlm", _) => "Ctrl+Shift+W",
+                    ("messages", _) => "Ctrl+M",
+                    ("preferences", _) => "Ctrl+P",
+                    ("playlist", _) => "Ctrl+L",
+                    ("minimal", _) => "Ctrl+H",
+                    ("help", _) => "F1",
+                    ("volume-step", "5") => "Ctrl+Up",
+                    ("volume-step", "-5") => "Ctrl+Down",
+                    _ => "",
+                };
+                let title = match title {
+                    "Customize Interface…" => "Customise Interface…",
+                    "VLsub…" => "VLsub — Find Subtitles Online…",
+                    t => t,
+                };
+                Entry::Cmd { title, key, value, shortcut }
+            }
+            Entry::Act { title, action, .. } => {
+                let shortcut = match action {
+                    Action::OpenSingle => "Ctrl+O",
+                    Action::OpenMultiple => "Ctrl+Shift+O",
+                    Action::OpenStream => "Ctrl+N",
+                    Action::SavePlaylist => "Ctrl+Y",
+                    Action::Quit => "Ctrl+Q",
+                    Action::PlayPause => "Space",
+                    Action::About => "Shift+F1",
+                    Action::Fullscreen if menu == "View" => "F11",
+                    _ => "",
+                };
+                let title = if title == "Quit RMP" { "Quit" } else { title };
+                Entry::Act { title, action, shortcut }
+            }
+            Entry::Sub { title, items } => Entry::Sub { title, items: windows_entries(items, menu) },
+            other => other,
+        })
+        .collect()
+}
+
+fn mac_menu_bar() -> Vec<(&'static str, Vec<Entry>)> {
     use Action::*;
     use Entry::Sep;
     vec![
