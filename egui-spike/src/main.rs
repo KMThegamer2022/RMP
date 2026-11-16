@@ -179,6 +179,8 @@ pub struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         install_fonts(&cc.egui_ctx);
+        // As early as possible: a file that launched RMP is delivered right after launch finishes.
+        appkit::register_open_handler(&cc.egui_ctx);
         let store = Store::load();
         let skin = store.theme;
         let mut tex = Textures::default();
@@ -468,7 +470,6 @@ impl App {
     fn start(&mut self, ctx: &egui::Context, frame: &eframe::Frame) {
         self.started = true;
         appkit::set_app_icon(LOGO_PNG);
-        appkit::register_open_handler(ctx);
         self.surfaces = appkit::Surfaces::attach(frame);
         let view = self.surfaces.as_ref().map_or(std::ptr::null_mut(), |s| s.video_handle());
         self.engine = Engine::create(view);
@@ -827,6 +828,7 @@ fn install_fonts(ctx: &egui::Context) {
 }
 
 fn main() -> eframe::Result {
+    appkit::register_open_handler_at_launch();
     // ui.m main(): VLC_PLUGIN_PATH points at the bundle's plugins. The spike runs from target/, so it
     // uses the plugins inside VLC.app unless the caller set the variable.
     let bundled = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).filter(|d| d.is_dir());

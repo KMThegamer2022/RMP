@@ -353,15 +353,28 @@ objc2::define_class!(
         #[unsafe(method(handleOpen:withReply:))]
         fn handle_open(&self, event: &objc2_foundation::NSAppleEventDescriptor, _reply: &objc2_foundation::NSAppleEventDescriptor) {
             // keyDirectObject '----': a list of file URLs.
+            if std::env::var_os("RMP_SPIKE_DEBUG").is_some() {
+                eprintln!("odoc event received");
+            }
             let Some(list) = event.paramDescriptorForKeyword(0x2D2D_2D2D) else { return };
             let mut paths = Vec::new();
+            let debug = std::env::var_os("RMP_SPIKE_DEBUG").is_some();
+            if debug {
+                eprintln!("odoc list items: {}", list.numberOfItems());
+            }
             for i in 1..=list.numberOfItems() {
                 let Some(item) = list.descriptorAtIndex(i) else { continue };
-                // typeFileURL 'furl'
-                let Some(url) = item.coerceToDescriptorType(0x6675_726C).and_then(|d| d.stringValue()) else { continue };
-                if let Some(path) = url.to_string().strip_prefix("file://") {
-                    paths.push(percent_decode(path));
+                // The item is a file URL descriptor; fileURLValue resolves it (bookmark or file:// form).
+                if let Some(path) = item.fileURLValue().and_then(|u| u.path()) {
+                    paths.push(path.to_string());
+                } else if let Some(url) = item.coerceToDescriptorType(0x6675_726C).and_then(|d| d.stringValue()) {
+                    if let Some(path) = url.to_string().strip_prefix("file://") {
+                        paths.push(percent_decode(path));
+                    }
                 }
+            }
+            if debug {
+                eprintln!("odoc paths: {paths:?}");
             }
             if let Ok(mut q) = OPENED.lock() {
                 q.extend(paths);
@@ -373,10 +386,27 @@ objc2::define_class!(
     }
 );
 
-/// Registers for open-document events. Call once, on the main thread, after the app has started.
+/// Gives the open-document handler the context it wakes when a file arrives.
 pub fn register_open_handler(ctx: &egui::Context) {
-    let Some(mtm) = MainThreadMarker::new() else { return };
     let _ = REPAINT.set(ctx.clone());
+}
+
+/// A file that launched the app is delivered before the app finishes launching, and AppKit installs its
+/// own handler first. Registering from the will-finish-launching notification (call this before the
+/// event loop starts) puts this one in place in time.
+pub fn register_open_handler_at_launch() {
+    let Some(_mtm) = MainThreadMarker::new() else { return };
+    let block = block2::RcBlock::new(|_note: std::ptr::NonNull<objc2_foundation::NSNotification>| install_open_handler());
+    let center = objc2_foundation::NSNotificationCenter::defaultCenter();
+    unsafe {
+        let name = objc2_app_kit::NSApplicationWillFinishLaunchingNotification;
+        let token = center.addObserverForName_object_queue_usingBlock(Some(name), None, None, &block);
+        std::mem::forget(token);
+    }
+}
+
+fn install_open_handler() {
+    let Some(mtm) = MainThreadMarker::new() else { return };
     let handler: Retained<OpenHandler> = unsafe { objc2::msg_send![mtm.alloc::<OpenHandler>(), init] };
     unsafe {
         objc2_foundation::NSAppleEventManager::sharedAppleEventManager().setEventHandler_andSelector_forEventClass_andEventID(
@@ -385,6 +415,9 @@ pub fn register_open_handler(ctx: &egui::Context) {
             0x6165_7674, // kCoreEventClass 'aevt'
             0x6F64_6F63, // kAEOpenDocuments 'odoc'
         );
+    }
+    if std::env::var_os("RMP_SPIKE_DEBUG").is_some() {
+        eprintln!("odoc handler registered");
     }
     std::mem::forget(handler); // the event manager keeps only a weak reference
 }

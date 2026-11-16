@@ -706,3 +706,4 @@ pub fn register_open_handler(_ctx: &egui::Context) {}
 pub fn take_opened_files() -> Vec<String> {
     Vec::new()
 }
+pub fn register_open_handler_at_launch() {}
