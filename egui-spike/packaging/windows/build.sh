@@ -9,6 +9,7 @@ mkdir -p "$out"
 export VLC_DIR="$(cd "$runtime" && pwd)"
 (cd egui-spike && cargo build --locked --release)
 cp egui-spike/target/release/egui-spike.exe "$out/RMP.exe"
+cp updates/windows.ps1 "$out/update.ps1"
 cp "$runtime"/*.dll "$out/"
 cp -R "$runtime/plugins" "$runtime/lua" notices "$out/"
 cp packaging/midi/TimGM6mb.sf2 "$out/"

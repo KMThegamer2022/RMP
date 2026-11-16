@@ -69,6 +69,7 @@ impl App {
                 crate::dialogs::Dialog::Configure { preferences, .. } => format!("configure:{preferences}"),
                 crate::dialogs::Dialog::Vlsub => "vlsub".into(),
                 crate::dialogs::Dialog::UpdateOffer { version, .. } => format!("update:{version}"),
+                crate::dialogs::Dialog::Updating { version, .. } => format!("updating:{version}"),
             })
             .collect();
         format!(

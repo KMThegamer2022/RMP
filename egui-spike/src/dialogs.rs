@@ -18,7 +18,9 @@ pub enum Dialog {
     Effects { sync: bool, eq_rows: Vec<(String, String)>, eq_selected: Option<usize>, fields: Vec<(String, String, String)> },
     Configure { preferences: bool, advanced: bool, status: bool, docked: bool, volume: i32 },
     Vlsub,
-    UpdateOffer { version: String, notes: String },
+    UpdateOffer { version: String, notes: String, url: String, sha256: String },
+    /// The download window (updateWindow): progress, then a 5 second countdown to the restart.
+    Updating { version: String, fraction: f64, zip: Option<std::path::PathBuf>, deadline: Option<std::time::Instant>, dl: crate::updates::Download },
 }
 
 /// One NSAlert: icon, bold title, optional text, accessory view, buttons. Returns the pressed button.
@@ -223,7 +225,7 @@ fn step(app: &mut App, ctx: &egui::Context, dialog: &mut Dialog) -> bool {
                 None => true,
             }
         }
-        Dialog::UpdateOffer { version, notes } => {
+        Dialog::UpdateOffer { version, notes, url, sha256 } => {
             let title = format!("Update to RMP {version}?");
             let n = notes.clone();
             let r = alert(
@@ -241,16 +243,71 @@ fn step(app: &mut App, ctx: &egui::Context, dialog: &mut Dialog) -> bool {
             );
             match r {
                 Some(0) => {
-                    // The shipping app downloads and replaces RMP.app. This build is not a bundle, so
-                    // there is nothing to replace; say so instead of pretending.
-                    app.note(
-                        "RMP could not update",
-                        "This copy of RMP is the egui preview and is not an installed app bundle, so it cannot replace itself. Download the release from GitHub.",
-                    );
-                    false
+                    if crate::appkit::bundle_path().is_none() {
+                        // The shipping app replaces RMP.app. A copy that is not an installed bundle has nothing to replace.
+                        app.note(
+                            "RMP could not update",
+                            "This copy of RMP is not an installed app, so it cannot replace itself. Install it from the release.",
+                        );
+                        false
+                    } else {
+                        let dl = crate::updates::download(url.clone(), sha256.clone());
+                        app.dialogs.insert(0, Dialog::Updating { version: version.clone(), fraction: 0.0, zip: None, deadline: None, dl });
+                        false
+                    }
                 }
                 Some(_) => false,
                 None => true,
+            }
+        }
+        Dialog::Updating { version, fraction, zip, deadline, dl } => {
+            use crate::updates::Progress;
+            while let Ok(p) = dl.rx.try_recv() {
+                match p {
+                    Progress::Fraction(f) => *fraction = f,
+                    Progress::Ready(path) => {
+                        *zip = Some(path);
+                        *deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+                    }
+                    Progress::Failed(reason) => {
+                        app.note("RMP could not update", reason);
+                        return false;
+                    }
+                }
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            let ready = zip.is_some();
+            let label = match deadline {
+                Some(d) => {
+                    let left = d.saturating_duration_since(std::time::Instant::now()).as_secs() + 1;
+                    format!("RMP {version} is ready. Restarting in {left} seconds to finish the update.")
+                }
+                None => format!("Downloading RMP {version}… {}%", (*fraction * 100.0) as i32),
+            };
+            let buttons: &[&str] = if ready { &["Restart Now", "Cancel"] } else { &["Cancel"] };
+            let frac = *fraction as f32;
+            let r = alert(ctx, app, "updating", "Updating RMP", &label, buttons, |ui| {
+                ui.add(egui::ProgressBar::new(frac).desired_width(290.0));
+            });
+            let due = deadline.is_some_and(|d| std::time::Instant::now() >= d);
+            if (ready && r == Some(0)) || due {
+                let path = zip.take().unwrap_or_default();
+                match crate::updates::install(&path, version) {
+                    Ok(()) => {
+                        app.quit_requested = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    Err(reason) => app.note("RMP could not update", reason),
+                }
+                false
+            } else if r.is_some() {
+                dl.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                if let Some(path) = zip.take() {
+                    let _ = std::fs::remove_file(path);
+                }
+                false
+            } else {
+                true
             }
         }
     }

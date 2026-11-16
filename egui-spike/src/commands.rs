@@ -72,7 +72,7 @@ impl App {
     pub fn run_action(&mut self, action: Action, ctx: &egui::Context) {
         match action {
             Action::About => appkit::show_about_panel(&updates::current_version(), crate::LOGO_PNG),
-            Action::CheckUpdates => self.update_rx = Some((updates::check(), true)),
+            Action::CheckUpdates => self.start_update_check(true),
             Action::Quit => {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

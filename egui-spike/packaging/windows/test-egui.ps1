@@ -12,6 +12,8 @@ public class In {
  [DllImport("user32")] public static extern bool SetCursorPos(int x,int y);
  [DllImport("user32")] public static extern bool SetForegroundWindow(IntPtr w);
  [DllImport("user32")] public static extern bool GetWindowRect(IntPtr w,out RECT r);
+ [DllImport("user32",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
+ [DllImport("user32")] public static extern IntPtr SendMessage(IntPtr w,uint m,IntPtr a,IntPtr b);
  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
  public static void Key(byte vk){ keybd_event(vk,0,0,UIntPtr.Zero); keybd_event(vk,0,2,UIntPtr.Zero); }
  public static void Click(int x,int y,int n){ SetCursorPos(x,y); for(int i=0;i<n;i++){ mouse_event(2,0,0,0,UIntPtr.Zero); mouse_event(4,0,0,0,UIntPtr.Zero); System.Threading.Thread.Sleep(60);} }
@@ -96,4 +98,19 @@ quit
   Expect (Field $log 'skin' 'state') '3' "skin $skin playing"
   if (!$p.WaitForExit(20000)) { $p.Kill() }
 }
-Write-Host 'All egui checks passed'
+# --- Check for Updates (update.ps1 shows its own dialog) ----------------------------------------
+$env:RMP_SPIKE_LOG = Join-Path $OutDir 'update.log'; $env:RMP_SPIKE_THEME = 'vlc'
+@"
+wait 3
+act updates
+wait 25
+quit
+"@ | Set-Content $script
+$p = Start-Process $Exe -ArgumentList "`"$Fixture`"" -PassThru
+$dialog = [IntPtr]::Zero
+for ($i = 0; $i -lt 300 -and $dialog -eq [IntPtr]::Zero; $i++) { $dialog = [In]::FindWindow('#32770', 'RMP update'); Start-Sleep -Milliseconds 100 }
+if ($dialog -eq [IntPtr]::Zero) { throw 'Check for Updates did not show a result dialog' }
+Write-Host 'OK  Check for Updates shows the update dialog'
+[void][In]::SendMessage($dialog, 16, [IntPtr]::Zero, [IntPtr]::Zero)
+if (!$p.WaitForExit(40000)) { $p.Kill() }
+Write-Host 'All egui checks passed' 

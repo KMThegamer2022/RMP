@@ -492,9 +492,24 @@ impl App {
             self.accept(sources);
         }
         if std::env::var_os("RMP_SPIKE_NO_UPDATE_CHECK").is_none() {
-            self.update_rx = Some((updates::check(), false)); // checkMacUpdates(NO)
+            self.start_update_check(false); // checkMacUpdates(NO) / launchCheck(false)
         }
         let _ = ctx;
+    }
+
+    /// Looks for an update. macOS reads the manifest here; Windows hands over to update.ps1 as the
+    /// shipping player does.
+    pub fn start_update_check(&mut self, manual: bool) {
+        #[cfg(windows)]
+        {
+            if !updates::launch_windows_check(manual) && manual {
+                self.note("Could not check for updates", "update.ps1 is missing from the RMP folder.");
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            self.update_rx = Some((updates::check(), manual));
+        }
     }
 
     fn poll_background(&mut self) {
@@ -503,8 +518,8 @@ impl App {
                 let explicit = *explicit;
                 self.update_rx = None;
                 match outcome {
-                    updates::Outcome::Available { version, notes, .. } => {
-                        self.dialogs.push(dialogs::Dialog::UpdateOffer { version, notes });
+                    updates::Outcome::Available { version, notes, url, sha256 } => {
+                        self.dialogs.push(dialogs::Dialog::UpdateOffer { version, notes, url, sha256 });
                     }
                     updates::Outcome::UpToDate { current } if explicit => {
                         self.note("RMP is up to date", format!("You are running RMP {current}."));

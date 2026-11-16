@@ -1,6 +1,6 @@
 [package]
 name = "rmp"
-version = "3.2.2"
+version = "4.0.0"
 edition = "2021"
 
 [lib]
