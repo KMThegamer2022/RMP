@@ -22,6 +22,13 @@ public class In {
   SendInput(1,ref i,40); System.Threading.Thread.Sleep(60);
   i.flags=2; SendInput(1,ref i,40); }
  [DllImport("user32")] public static extern uint MapVirtualKey(uint code,uint type);
+ // The runner drops synthetic keyboard input, so (like the shipping player's tests) deliver key messages to the window.
+ public static void KeyMessage(IntPtr w,byte vk){
+  uint scan=MapVirtualKey(vk,0);
+  SendMessage(w,0x100,(IntPtr)vk,(IntPtr)(long)(1|(scan<<16)));
+  System.Threading.Thread.Sleep(60);
+  SendMessage(w,0x101,(IntPtr)vk,(IntPtr)(long)(1|(scan<<16)|0xC0000000L));
+ }
  public static void Click(int x,int y,int n){ SetCursorPos(x,y); for(int i=0;i<n;i++){ mouse_event(2,0,0,0,UIntPtr.Zero); mouse_event(4,0,0,0,UIntPtr.Zero); System.Threading.Thread.Sleep(60);} }
 }
 '@
@@ -81,13 +88,13 @@ $soft = @()
 try { Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Escape leaves fullscreen.
 [void][In]::SetForegroundWindow($window)
-[In]::Key(0x1B)
+[In]::KeyMessage($window, 0x1B)
 Wait-Label $log 'c'
 Write-Host ((Select-String -Path $log -Pattern '^c ' | Select-Object -First 1).Line -replace '^.*input=','input=')
 try { Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Space pauses.
 [void][In]::SetForegroundWindow($window)
-[In]::Key(0x20)
+[In]::KeyMessage($window, 0x20)
 Wait-Label $log 'd'
 Write-Host ((Select-String -Path $log -Pattern '^d ' | Select-Object -First 1).Line -replace '^.*input=','input=')
 try { Expect (Field $log 'd' 'state') '4' 'Space pauses' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
