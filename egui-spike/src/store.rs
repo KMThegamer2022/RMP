@@ -8,6 +8,9 @@ use std::path::PathBuf;
 const RECENT_MAX: usize = 20;
 
 fn dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("RMP_SPIKE_PREFS_DIR") {
+        return Some(PathBuf::from(d)); // test hook
+    }
     #[cfg(target_os = "macos")]
     {
         let home = std::env::var_os("HOME")?;
@@ -34,14 +37,51 @@ pub struct Store {
     theme_override: bool,
 }
 
-/// Windows: the theme the installer asked for. Elsewhere there is none.
-fn first_run_theme() -> Option<Skin> {
+/// First run: bring over what the shipping app kept. macOS reads its NSUserDefaults domain; Windows
+/// reads the registry values the player and the installer wrote. Returns true if anything was found.
+fn import_shipping(s: &mut Store) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // The domain holds binary values plutil cannot convert as a whole, so read each key as raw text.
+        let raw = |key: &str| -> Option<String> {
+            let script = format!("/usr/bin/defaults export io.github.kmthegamer2022.rmp - | /usr/bin/plutil -extract '{key}' raw -o - -");
+            let out = std::process::Command::new("/bin/sh").args(["-c", &script]).output().ok()?;
+            out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim_end_matches('\n').to_string())
+        };
+        let flag = |k: &str| raw(k).map(|v| v == "true" || v == "1");
+        let number = |k: &str| raw(k).and_then(|v| v.parse::<i32>().ok());
+        let mut found = false;
+        if let Some(skin) = number("PlayerTheme").and_then(Skin::from_index) {
+            s.theme = skin;
+            found = true;
+        }
+        s.previous_theme = number("PreviousTheme").and_then(Skin::from_index);
+        if let Some(v) = flag("AdvancedControls") { s.advanced = v; found = true; }
+        if let Some(v) = flag("ShowStatusBar") { s.status_bar = v; found = true; }
+        if let Some(v) = flag("UndockedPlaylist") { s.undocked_playlist = v; found = true; }
+        if let Some(v) = flag("DesktopShortcut") { s.desktop_shortcut = v; found = true; }
+        if let Some(v) = number("StartupVolume") { s.startup_volume = Some(v.clamp(0, 100)); found = true; }
+        s.recent = (0..RECENT_MAX).map_while(|i| raw(&format!("RecentMedia.{i}"))).filter(|p| !p.is_empty()).collect();
+        found |= !s.recent.is_empty();
+        found
+    }
     #[cfg(windows)]
     {
-        return crate::appkit::installer_theme().and_then(Skin::from_index);
+        let mut found = false;
+        if let Some(skin) = crate::appkit::registry_dword("Theme").and_then(|v| Skin::from_index(v as i32)) {
+            s.theme = skin;
+            found = true;
+        }
+        s.previous_theme = crate::appkit::registry_dword("PreviousTheme").and_then(|v| Skin::from_index(v as i32));
+        if let Some(v) = crate::appkit::registry_dword("DefaultVolume") {
+            s.startup_volume = Some((v as i32).clamp(0, 100));
+            found = true;
+        }
+        if let Some(v) = crate::appkit::registry_dword("DesktopShortcut") {
+            s.desktop_shortcut = v != 0;
+        }
+        found
     }
-    #[cfg(not(windows))]
-    None
 }
 
 impl Store {
@@ -57,6 +97,7 @@ impl Store {
             recent: Vec::new(),
             theme_override: false,
         };
+        let mut imported = false;
         if let Some(d) = dir() {
             if let Ok(text) = std::fs::read_to_string(d.join("prefs.txt")) {
                 for line in text.lines() {
@@ -72,15 +113,19 @@ impl Store {
                         _ => {}
                     }
                 }
-            } else if let Some(skin) = first_run_theme() {
-                s.theme = skin;
             } else if let Ok(t) = std::fs::read_to_string(d.join("theme.txt")) {
                 // Earlier spike builds kept only the theme.
                 s.theme = Skin::from_slug(&t).unwrap_or(Skin::Vlc);
+            } else if import_shipping(&mut s) {
+                imported = true;
             }
             if let Ok(text) = std::fs::read_to_string(d.join("recent.txt")) {
                 s.recent = text.lines().filter(|l| !l.is_empty()).map(String::from).collect();
             }
+        }
+        if imported {
+            s.save();
+            s.save_recent();
         }
         if let Some(skin) = std::env::var("RMP_SPIKE_THEME").ok().and_then(|v| Skin::from_slug(&v)) {
             s.theme = skin;

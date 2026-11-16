@@ -523,14 +523,14 @@ pub fn symbol_image(name: &str, point_size: f64) -> Option<egui::ColorImage> {
     Some(img)
 }
 
-/// The theme the installer's first page stored (HKCU\\Software\\RMP\\Theme, a themes.h index).
-pub fn installer_theme() -> Option<i32> {
+/// A DWORD under HKCU\\Software\\RMP, where the shipping player and its installer keep settings.
+pub fn registry_dword(name: &str) -> Option<u32> {
     use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
-    let (key, value) = (wide("Software\\RMP"), wide("Theme"));
+    let (key, value) = (wide("Software\\RMP"), wide(name));
     let mut data = 0u32;
     let mut size = 4u32;
     let status = unsafe {
         RegGetValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr(), RRF_RT_REG_DWORD, std::ptr::null_mut(), &mut data as *mut u32 as *mut c_void, &mut size)
     };
-    (status == 0).then_some(data as i32)
+    (status == 0).then_some(data)
 }
