@@ -314,6 +314,11 @@ pub fn app_active() -> bool {
     MainThreadMarker::new().is_some_and(|mtm| NSApplication::sharedApplication(mtm).isActive())
 }
 
+/// Test hook: what the mouse polling has seen (Windows only).
+pub fn input_stats() -> String {
+    String::new()
+}
+
 /// Windows-only: a double-click on the libvlc window. On macOS egui sees the click itself.
 pub fn take_video_double_click() -> bool {
     false

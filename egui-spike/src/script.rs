@@ -73,7 +73,7 @@ impl App {
             })
             .collect();
         format!(
-            "{label} skin={} state={} time={} length={} volume={} count={} index={} status={:?} title={:?} page={} full={} minimal={} wallpaper={} top={} quit_end={} recording={} adv={} statusbar={} undocked={} playlist={} shuffle={} repeat={} recent={} lib={} dialogs=[{}] seekable={} video={}",
+            "{label} skin={} state={} time={} length={} volume={} count={} index={} status={:?} title={:?} page={} full={} minimal={} wallpaper={} top={} quit_end={} recording={} adv={} statusbar={} undocked={} playlist={} shuffle={} repeat={} recent={} lib={} dialogs=[{}] seekable={} video={} input=[{}]",
             self.skin.slug(),
             e.map_or(0, |e| e.state()),
             e.map_or(0, |e| e.time()),
@@ -101,6 +101,7 @@ impl App {
             titles.join(","),
             e.is_some_and(|e| e.seekable()),
             e.is_some_and(|e| e.has_video()),
+            crate::appkit::input_stats(),
         )
     }
 

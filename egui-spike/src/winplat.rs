@@ -43,6 +43,34 @@ static DOUBLE_CLICKED: AtomicBool = AtomicBool::new(false);
 
 static VIDEO_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
+static DOWNS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static INSIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static MESSAGES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Test hook: left-button presses seen, how many were over the video, and WM_LBUTTONDBLCLK messages;
+/// plus the video window rectangle and the cursor.
+pub fn input_stats() -> String {
+    let video = VIDEO_WINDOW.load(Ordering::Relaxed);
+    let mut r = unsafe { std::mem::zeroed::<RECT>() };
+    if video != 0 {
+        unsafe { GetWindowRect(hwnd(video), &mut r) };
+    }
+    let p = cursor();
+    format!(
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{}",
+        DOWNS.load(Ordering::Relaxed),
+        INSIDE.load(Ordering::Relaxed),
+        MESSAGES.load(Ordering::Relaxed),
+        r.left,
+        r.top,
+        r.right,
+        r.bottom,
+        video != 0 && unsafe { IsWindowVisible(hwnd(video)) } != 0,
+        p.x,
+        p.y
+    )
+}
+
 struct ClickState {
     was_down: bool,
     last_press: Option<std::time::Instant>,
@@ -61,6 +89,7 @@ pub fn take_video_double_click() -> bool {
     let mut polled = false;
     let down = unsafe { GetAsyncKeyState(VK_LBUTTON as i32) } as u16 & 0x8000 != 0;
     if down && !st.was_down {
+        DOWNS.fetch_add(1, Ordering::Relaxed);
         let p = cursor();
         let video = VIDEO_WINDOW.load(Ordering::Relaxed);
         let inside = video != 0 && unsafe {
@@ -73,6 +102,7 @@ pub fn take_video_double_click() -> bool {
                 && p.y < r.bottom
         };
         if inside {
+            INSIDE.fetch_add(1, Ordering::Relaxed);
             let window = std::time::Duration::from_millis(unsafe { GetDoubleClickTime() } as u64);
             let near = (p.x - st.last_pos.0).abs() <= 8 && (p.y - st.last_pos.1).abs() <= 8;
             if st.last_press.is_some_and(|t| now.duration_since(t) <= window) && near {
@@ -96,6 +126,7 @@ pub fn take_video_double_click() -> bool {
 
 unsafe extern "system" fn video_proc(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_LBUTTONDBLCLK {
+        MESSAGES.fetch_add(1, Ordering::Relaxed);
         DOUBLE_CLICKED.store(true, Ordering::Relaxed);
         return 0;
     }

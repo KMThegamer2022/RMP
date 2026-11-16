@@ -67,7 +67,9 @@ Expect (Field $log 'a' 'full') 'false' 'windowed at start'
 $r = New-Object In+RECT; [void][In]::GetWindowRect($window, [ref]$r)
 [In]::Click([int](($r.L + $r.R) / 2), [int](($r.T + $r.B) / 2), 2)
 Wait-Label $log 'b'
-Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen'
+Write-Host ((Select-String -Path $log -Pattern '^b ' | Select-Object -First 1).Line -replace '^.*input=','input=')
+$soft = @()
+try { Expect (Field $log 'b' 'full') 'true' 'double-click enters fullscreen' } catch { $soft += $_.Exception.Message; Write-Host "FAIL $($_.Exception.Message)" }
 # Escape leaves fullscreen.
 [void][In]::SetForegroundWindow($window)
 [In]::Key(0x1B)
@@ -78,6 +80,7 @@ Expect (Field $log 'c' 'full') 'false' 'Escape leaves fullscreen'
 [In]::Key(0x20)
 Wait-Label $log 'd'
 Expect (Field $log 'd' 'state') '4' 'Space pauses'
+if ($soft) { $script:softFailures = $soft }
 if (!$p.WaitForExit(20000)) { $p.Kill(); throw 'RMP did not quit from the script' }
 Copy-Item $log (Join-Path $OutDir 'state-final.log')
 
@@ -113,4 +116,5 @@ if ($dialog -eq [IntPtr]::Zero) { throw 'Check for Updates did not show a result
 Write-Host 'OK  Check for Updates shows the update dialog'
 [void][In]::SendMessage($dialog, 16, [IntPtr]::Zero, [IntPtr]::Zero)
 if (!$p.WaitForExit(40000)) { $p.Kill() }
+if ($script:softFailures) { throw ('Failed: ' + ($script:softFailures -join '; ')) }
 Write-Host 'All egui checks passed' 
