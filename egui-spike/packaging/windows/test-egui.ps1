@@ -63,9 +63,12 @@ Expect (Field $log 'a' 'state') '3' 'playing after launch'
 Expect (Field $log 'a' 'video') 'true' 'video output present'
 Expect (Field $log 'a' 'full') 'false' 'windowed at start'
 # Double-click on the screen enters fullscreen.
-[void][In]::SetForegroundWindow($window)
-$r = New-Object In+RECT; [void][In]::GetWindowRect($window, [ref]$r)
-[In]::Click([int](($r.L + $r.R) / 2), [int](($r.T + $r.B) / 2), 2)
+# Click the middle of the video rectangle the app reports (screen coordinates).
+$line = (Select-String -Path $log -Pattern '^a ' | Select-Object -First 1).Line
+if ($line -notmatch 'rect=(-?\d+),(-?\d+),(-?\d+),(-?\d+)') { throw 'No video rectangle in the state dump' }
+$cx = [int](([int]$Matches[1] + [int]$Matches[3]) / 2); $cy = [int](([int]$Matches[2] + [int]$Matches[4]) / 2)
+Write-Host "Double-clicking the video at $cx,$cy"
+[In]::Click($cx, $cy, 2)
 Wait-Label $log 'b'
 Write-Host ((Select-String -Path $log -Pattern '^b ' | Select-Object -First 1).Line -replace '^.*input=','input=')
 $soft = @()
