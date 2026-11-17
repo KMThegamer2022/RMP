@@ -573,11 +573,12 @@ impl App {
         }
         // Only a text field counts as typing. A clicked button or slider keeps egui focus, and that used
         // to swallow Space and every other shortcut; drop that focus so it cannot also act on the key.
-        let typing = ctx.egui_wants_keyboard_input();
-        if !typing {
-            if let Some(id) = ctx.memory(|m| m.focused()) {
-                ctx.memory_mut(|m| m.surrender_focus(id));
-            }
+        // (A text field is a focused widget that has TextEdit state; egui_wants_keyboard_input is true
+        // for any focused widget, so it cannot tell them apart.)
+        let focused = ctx.memory(|m| m.focused());
+        let typing = focused.is_some_and(|id| egui::TextEdit::load_state(ctx, id).is_some());
+        if let (false, Some(id)) = (typing, focused) {
+            ctx.memory_mut(|m| m.surrender_focus(id));
         }
         // Command on macOS; Ctrl on Windows, where egui reports Ctrl as both `command` and `ctrl`.
         let primary = |key: egui::Key, shift: bool| hit(key, shift, true, cfg!(windows));
