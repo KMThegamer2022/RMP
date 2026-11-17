@@ -571,7 +571,14 @@ impl App {
         if hit(egui::Key::F1, false, false, false) {
             appkit::open_url(LINK_TARGET);
         }
-        let typing = ctx.memory(|m| m.focused().is_some());
+        // Only a text field counts as typing. A clicked button or slider keeps egui focus, and that used
+        // to swallow Space and every other shortcut; drop that focus so it cannot also act on the key.
+        let typing = ctx.egui_wants_keyboard_input();
+        if !typing {
+            if let Some(id) = ctx.memory(|m| m.focused()) {
+                ctx.memory_mut(|m| m.surrender_focus(id));
+            }
+        }
         // Command on macOS; Ctrl on Windows, where egui reports Ctrl as both `command` and `ctrl`.
         let primary = |key: egui::Key, shift: bool| hit(key, shift, true, cfg!(windows));
         if primary(egui::Key::Q, false) {
