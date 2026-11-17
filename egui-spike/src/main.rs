@@ -842,6 +842,8 @@ fn main() -> eframe::Result {
     if let (None, Some(dir)) = (std::env::var_os("VLC_PLUGIN_PATH"), bundled) {
         std::env::set_var("VLC_PLUGIN_PATH", dir);
     }
+    // libvlc takes seconds to load on older PCs; start it now so it overlaps the window and graphics setup.
+    egui_spike::ap_prewarm();
     #[cfg(target_os = "macos")]
     if std::env::var_os("VLC_PLUGIN_PATH").is_none() {
         let app = std::env::var("VLC_APP").unwrap_or_else(|_| "/Applications/VLC.app".into());

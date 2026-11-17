@@ -96,13 +96,28 @@ impl Drop for Engine {
         }
     }
 }
+// Loading libvlc takes seconds on older machines, so an app may start it before its window exists.
+static PREWARMED: std::sync::Mutex<Option<std::thread::JoinHandle<Engine>>> = std::sync::Mutex::new(None);
+#[no_mangle]
+pub extern "C" fn ap_prewarm() {
+    if let Ok(mut slot) = PREWARMED.lock() {
+        if slot.is_none() {
+            *slot = std::thread::Builder::new()
+                .name("rmp-playback-init".into())
+                .spawn(|| unsafe { create_engine() })
+                .ok();
+        }
+    }
+}
 #[no_mangle]
 pub extern "C" fn ap_prepare(p: &mut Player) {
     if p.player.is_null() && p.warming.is_none() {
-        p.warming = std::thread::Builder::new()
-            .name("rmp-playback-init".into())
-            .spawn(|| unsafe { create_engine() })
-            .ok();
+        p.warming = PREWARMED.lock().ok().and_then(|mut slot| slot.take()).or_else(|| {
+            std::thread::Builder::new()
+                .name("rmp-playback-init".into())
+                .spawn(|| unsafe { create_engine() })
+                .ok()
+        });
     }
 }
 unsafe fn create_engine() -> Engine {
