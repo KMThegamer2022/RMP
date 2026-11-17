@@ -1,13 +1,13 @@
 {
-  "version": "3.2.2",
-  "tag": "v3.2.2",
-  "notes": "RMP 3.2.2 fixes updates and the Windows seek bar.",
+  "version": "4.0.0",
+  "tag": "v4.0.0",
+  "notes": "RMP 4.0.0: a new interface for macOS and Windows with the same themes, menus, library and playback. It opens files from Finder or Explorer and updates itself.",
   "windows": {
     "name": "RMP-Setup-x64.exe",
-    "sha256": "5c949a65d175499d02f90fb31ef795594bc64b7af89022b44472a33eccc6014e"
+    "sha256": "d7a729893f7ce75615c623be4dc0d4de60fc9a1fdec1e4f3c8428ef57a311342"
   },
   "macos": {
-    "name": "RMP-3.2.2-macOS-arm64.zip",
-    "sha256": "67e2617bb1d7ba6b3d4fba3017d44ecf4e7fc4b7fe120249fd479489f92b83e3"
+    "name": "RMP-4.0.0-macOS-arm64.zip",
+    "sha256": "974dbede68620755f39a3dd01650fd0981311c5fee3364c28b1e5b075c7640df"
   }
 }
