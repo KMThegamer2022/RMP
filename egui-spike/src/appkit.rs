@@ -315,6 +315,9 @@ pub fn app_active() -> bool {
 }
 
 /// Windows-only: keys that did not reach the main window. Nothing to do on macOS.
+pub fn take_space() -> bool {
+    false
+}
 pub fn inject_keys(_raw: &mut eframe::egui::RawInput) {}
 
 /// Test hook: what the mouse polling has seen (Windows only).

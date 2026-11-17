@@ -127,6 +127,7 @@ fn png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::Te
 
 pub struct App {
     pub engine: Option<Engine>,
+    pub last_space: Option<std::time::Instant>,
     pub surfaces: Option<appkit::Surfaces>,
     pub store: Store,
     pub skin: Skin,
@@ -200,6 +201,7 @@ impl App {
             quit_at_end: false,
             recording: false,
             wallpaper: None,
+            last_space: None,
             always_top: false,
             minimal: false,
             playlist_shown: false,
@@ -568,6 +570,7 @@ impl App {
                 .collect()
         });
         let hit = |key: egui::Key, shift: bool, cmd: bool, ctrl: bool| presses.iter().any(|p| p.0 == key && p.1 == shift && p.2 == cmd && p.3 == ctrl);
+        let space_message = appkit::take_space();
         if hit(egui::Key::F1, false, false, false) {
             appkit::open_url(LINK_TARGET);
         }
@@ -603,8 +606,12 @@ impl App {
         let cmd = |key: &'static str, title: &str| Picked::Command { key, value: String::new(), title: title.into() };
         if cfg!(windows) {
             // player-menus.h accelerators.
-            if hit(egui::Key::Space, false, false, false) {
+            let space = hit(egui::Key::Space, false, false, false) || space_message;
+            if space && self.last_space.is_none_or(|t| t.elapsed() > std::time::Duration::from_millis(300)) {
+                self.last_space = Some(std::time::Instant::now());
                 run = Some(Picked::Action(Action::PlayPause));
+            } else if space {
+                // The same press arrived by two routes.
             } else if primary(egui::Key::O, false) {
                 run = Some(Picked::Action(Action::OpenSingle));
             } else if primary(egui::Key::O, true) {

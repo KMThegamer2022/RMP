@@ -608,6 +608,12 @@ pub fn registry_dword(name: &str) -> Option<u32> {
 static KEYS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::new(Vec::new());
 static KEYS_SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static KEYS_INJECTED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Set by the window subclass when Space is pressed. Space is acted on from here as well as from egui's
+/// key events, because on some PCs egui's copy of the key never produced the shortcut.
+static SPACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn take_space() -> bool {
+    SPACE.swap(false, Ordering::Relaxed)
+}
 static HOOK_STATUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
 
 unsafe extern "system" fn key_subclass(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _data: usize) -> LRESULT {
@@ -618,6 +624,9 @@ unsafe extern "system" fn key_subclass(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM
         // Auto-repeat (bit 30 set on a key-down) is not a new press.
         let repeat = down && (lp as u32 >> 30) & 1 == 1;
         if !repeat {
+            if down && wp as u32 == 0x20 && unsafe { GetAsyncKeyState(0x11) } as u16 & 0x8000 == 0 && unsafe { GetAsyncKeyState(0x12) } as u16 & 0x8000 == 0 {
+                SPACE.store(true, Ordering::Relaxed);
+            }
             if let Ok(mut q) = KEYS.lock() {
                 if q.len() < 64 {
                     q.push((wp as u32, down));
