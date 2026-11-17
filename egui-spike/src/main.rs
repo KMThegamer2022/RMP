@@ -580,6 +580,14 @@ impl App {
         if let (false, Some(id)) = (typing, focused) {
             ctx.memory_mut(|m| m.surrender_focus(id));
         }
+        if !presses.is_empty() {
+            if let Some(path) = std::env::var_os("RMP_SPIKE_LOG") {
+                use std::io::Write;
+                if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                    let _ = writeln!(f, "keys presses={presses:?} focused={focused:?} typing={typing} dialogs={}", self.dialogs.len());
+                }
+            }
+        }
         // Command on macOS; Ctrl on Windows, where egui reports Ctrl as both `command` and `ctrl`.
         let primary = |key: egui::Key, shift: bool| hit(key, shift, true, cfg!(windows));
         if primary(egui::Key::Q, false) {
