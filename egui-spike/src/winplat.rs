@@ -57,7 +57,7 @@ pub fn input_stats() -> String {
     }
     let p = cursor();
     format!(
-        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} main={:x} focus={} foreground_ours={} keys_seen={} keys_injected={} subclass={}",
+        "downs={} inside={} dblmsg={} rect={},{},{},{} visible={} cursor={},{} main={:x} focus={} foreground_ours={} keys_seen={} keys_injected={} lastvk={:x} lastchar={:x} subclass={}",
         DOWNS.load(Ordering::Relaxed),
         INSIDE.load(Ordering::Relaxed),
         MESSAGES.load(Ordering::Relaxed),
@@ -76,6 +76,8 @@ pub fn input_stats() -> String {
         app_active(),
         KEYS_SEEN.load(Ordering::Relaxed),
         KEYS_INJECTED.load(Ordering::Relaxed),
+        LAST_VK.load(Ordering::Relaxed),
+        LAST_CHAR.load(Ordering::Relaxed),
         HOOK_STATUS.load(Ordering::Relaxed)
     )
 }
@@ -614,12 +616,22 @@ static SPACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new
 pub fn take_space() -> bool {
     SPACE.swap(false, Ordering::Relaxed)
 }
+static LAST_VK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static LAST_CHAR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 static HOOK_STATUS: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(-1);
 
 unsafe extern "system" fn key_subclass(w: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _id: usize, _data: usize) -> LRESULT {
     let down = msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN;
     let up = msg == WM_KEYUP || msg == WM_SYSKEYUP;
+    if msg == WM_CHAR {
+        // Remote-control tools and some input methods send a typed space instead of a Space key.
+        LAST_CHAR.store(wp as u32, Ordering::Relaxed);
+        if wp as u32 == 0x20 {
+            SPACE.store(true, Ordering::Relaxed);
+        }
+    }
     if down || up {
+        LAST_VK.store(wp as u32, Ordering::Relaxed);
         KEYS_SEEN.fetch_add(1, Ordering::Relaxed);
         // Auto-repeat (bit 30 set on a key-down) is not a new press.
         let repeat = down && (lp as u32 >> 30) & 1 == 1;
