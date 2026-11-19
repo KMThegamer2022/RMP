@@ -4,4 +4,4 @@ version = 4
 
 [[package]]
 name = "rmp"
-version = "4.0.1"
+version = "4.0.2"
