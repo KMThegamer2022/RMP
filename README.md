@@ -118,7 +118,7 @@ This Mac build is locally signed and hasn't been notarized by Apple.
 
 - **Mac:** tested locally with H.264 video and AAC audio in MKV, embedded SRT subtitles, FLAC audio, and fast-start MP4 over HTTP.
 - **Windows:** GitHub Actions builds the x64 executable, bundles the pinned VideoLAN runtime, and runs playback, installation, installed playback and uninstallation tests on Windows Server 2022.
-- **Windows 7 SP1:** visual and runtime testing is still pending.
+- **Windows 7 SP1:** visual and runtime testing is still pending. The bundled yt-dlp needs Windows 8.1 or newer, so on Windows 7 YouTube links are handed straight to LibVLC, which may not resolve them.
 
 Format and stream compatibility depend on the codecs, encryption and server behaviour involved.
 

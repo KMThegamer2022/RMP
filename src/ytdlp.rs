@@ -7,7 +7,43 @@ use std::time::{Duration, Instant};
 
 const TIMEOUT: Duration = Duration::from_secs(60);
 
+/// The bundled yt-dlp is built for Windows 8.1 and newer. On Windows 7 it cannot
+/// start, so YouTube links are passed to LibVLC unchanged instead.
+#[cfg(windows)]
+fn windows_supports_helper() -> bool {
+    #[repr(C)]
+    struct OsVersionInfo {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform: u32,
+        service_pack: [u16; 128],
+    }
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn RtlGetVersion(info: *mut OsVersionInfo) -> i32;
+    }
+    let mut info = OsVersionInfo {
+        size: std::mem::size_of::<OsVersionInfo>() as u32,
+        major: 0,
+        minor: 0,
+        build: 0,
+        platform: 0,
+        service_pack: [0; 128],
+    };
+    // SAFETY: the struct matches RTL_OSVERSIONINFOW and its size field is set first.
+    if unsafe { RtlGetVersion(&mut info) } != 0 {
+        return false;
+    }
+    (info.major, info.minor) >= (6, 3)
+}
+
 fn helper() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if !windows_supports_helper() {
+        return None;
+    }
     let name = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
     let path = std::env::current_exe().ok()?.parent()?.join(name);
     path.is_file().then_some(path)
