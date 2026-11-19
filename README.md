@@ -37,6 +37,8 @@ Built on a Rust playback core and libVLC, with native interfaces on each platfor
 
 > New installations start with the **VLC** theme. You can change it any time under **View → Theme**.
 
+> **Windows 7 users:** RMP runs on Windows 7 SP1, but it has not been tested on Windows 7 yet. YouTube links need Windows 8.1 or newer, because the bundled yt-dlp does not start on Windows 7.
+
 ## ⌨️ Controls
 
 | Action | Mac | Windows |
